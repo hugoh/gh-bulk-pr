@@ -24,26 +24,25 @@ const (
 	labelBlocked     = "blocked"
 )
 
-func helpStyle() lipgloss.Style   { return lipgloss.NewStyle().Foreground(lipgloss.Color("241")) }
-func errStyle() lipgloss.Style    { return lipgloss.NewStyle().Foreground(lipgloss.Color("196")) }
-func okStyle() lipgloss.Style     { return lipgloss.NewStyle().Foreground(lipgloss.Color("42")) }
-func headerStyle() lipgloss.Style { return lipgloss.NewStyle().Bold(true) }
-
-func separatorStyle() lipgloss.Style { return lipgloss.NewStyle().Foreground(lipgloss.Color("240")) }
-
-func footerStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Padding(0, 1)
+// adaptive is a colour that reads on both light and dark terminal backgrounds.
+func adaptive(light, dark string) lipgloss.AdaptiveColor {
+	return lipgloss.AdaptiveColor{Light: light, Dark: dark}
 }
 
-func previewTitleStyle() lipgloss.Style { return lipgloss.NewStyle().Bold(true) }
-
-func previewMetaStyle() lipgloss.Style { return lipgloss.NewStyle().Foreground(lipgloss.Color("241")) }
-
-func previewLabelStyle() lipgloss.Style { return lipgloss.NewStyle().Foreground(lipgloss.Color("214")) }
-
-func previewReviewerStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(lipgloss.Color("39"))
+func fg(light, dark string) lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(adaptive(light, dark))
 }
+
+func helpStyle() lipgloss.Style            { return fg("243", "241") }
+func errStyle() lipgloss.Style             { return fg("160", "196") }
+func okStyle() lipgloss.Style              { return fg("28", "42") }
+func headerStyle() lipgloss.Style          { return lipgloss.NewStyle().Bold(true) }
+func separatorStyle() lipgloss.Style       { return fg("250", "240") }
+func footerStyle() lipgloss.Style          { return helpStyle().Padding(0, 1) }
+func previewTitleStyle() lipgloss.Style    { return lipgloss.NewStyle().Bold(true) }
+func previewMetaStyle() lipgloss.Style     { return helpStyle() }
+func previewLabelStyle() lipgloss.Style    { return fg("166", "214") }
+func previewReviewerStyle() lipgloss.Style { return fg("27", "39") }
 
 func previewBoxStyle() lipgloss.Style {
 	return lipgloss.NewStyle().Padding(0, 1)
@@ -409,6 +408,13 @@ const footerPadding = 2
 // width instead of wrapping. Once PRs are selected the
 // actions come first, after how many are selected.
 func (m Model) footerText() string {
+	if m.quitArmed {
+		return fmt.Sprintf(
+			"%d selected · press q again to quit · any other key cancels",
+			len(m.selectedPRs()),
+		)
+	}
+
 	prefix, bindings := "", m.keys.short()
 
 	if n := len(m.selectedPRs()); n > 0 {

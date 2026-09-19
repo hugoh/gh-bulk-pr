@@ -900,3 +900,50 @@ func TestPrompt_FallsBackToTheBarePromptWhenTheListCannotFit(t *testing.T) {
 	assert.Contains(t, view, "Search: ")
 	assert.Contains(t, view, "esc")
 }
+
+// Not parallel: it swaps the global lipgloss color profile and background.
+func TestStylesAdaptToTheBackground(t *testing.T) {
+	prevProfile := lipgloss.ColorProfile()
+	prevDark := lipgloss.HasDarkBackground()
+
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	t.Cleanup(func() {
+		lipgloss.SetColorProfile(prevProfile)
+		lipgloss.SetHasDarkBackground(prevDark)
+	})
+
+	tests := map[string]struct {
+		render      func(string) string
+		light, dark string
+	}{
+		"ok": {func(s string) string { return okStyle().Render(s) }, "38;5;28m", "38;5;42m"},
+		"error": {
+			func(s string) string { return errStyle().Render(s) },
+			"38;5;160m",
+			"38;5;196m",
+		},
+		"help": {
+			func(s string) string { return helpStyle().Render(s) },
+			"38;5;243m",
+			"38;5;241m",
+		},
+		"label": {
+			func(s string) string { return previewLabelStyle().Render(s) },
+			"38;5;166m",
+			"38;5;214m",
+		},
+		"reviewer": {
+			func(s string) string { return previewReviewerStyle().Render(s) },
+			"38;5;27m",
+			"38;5;39m",
+		},
+	}
+
+	for name, tt := range tests {
+		lipgloss.SetHasDarkBackground(false)
+		assert.Contains(t, tt.render("x"), tt.light, name+" on a light background")
+
+		lipgloss.SetHasDarkBackground(true)
+		assert.Contains(t, tt.render("x"), tt.dark, name+" on a dark background")
+	}
+}

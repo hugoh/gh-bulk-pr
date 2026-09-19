@@ -18,6 +18,7 @@ gh bulk-pr --query "is:open is:pr author:@me archived:false"
 | Flag        | Default                                       | Description                       |
 | ----------- | --------------------------------------------- | --------------------------------- |
 | `--query`   | `is:open is:pr archived:false sort:updated-desc involves:@me`   | GitHub search query for the list  |
+| `--mouse`   | off                                           | Scroll with the mouse wheel (hold shift to select text) |
 | `--version` |                                               | Print version and exit            |
 
 ## Keys
@@ -41,8 +42,8 @@ Press `?` in the app for this list.
 | `r`                       | Refresh the PR list                            |
 | `esc`                     | Close preview, then clear selection            |
 | `?`                       | Show all keys                                  |
-| `q`                       | Quit                                           |
-| `ctrl+c`                  | Quit, from any screen                          |
+| `q`                       | Quit (press twice when PRs are selected)       |
+| `ctrl+c`                  | Quit at once, from any screen                  |
 
 Both tabs share the base query `is:open is:pr archived:false sort:updated-desc`. Editing the query with `/` deselects the tab unless it still matches one.
 

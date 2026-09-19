@@ -1395,3 +1395,140 @@ func TestLoadMore_FailedPageDropsItsPlaceholders(t *testing.T) {
 	require.ErrorIs(t, m.moreErr, assert.AnError)
 	assert.Len(t, m.table.Rows(), 50)
 }
+
+func TestQuitWithASelectionNeedsASecondPress(t *testing.T) {
+	t.Parallel()
+
+	m := loadedModel()
+	m.selected[keyOf(m.prs[0])] = true
+
+	armed, cmd := m.handleListKeyByString("q")
+	assert.Nil(t, cmd, "the first q only asks")
+	assert.True(t, armed.quitArmed)
+	assert.Contains(t, armed.footerText(), "q again to quit")
+	assert.Contains(t, armed.footerText(), "1 selected")
+
+	_, cmd = armed.handleListKeyByString("q")
+	require.NotNil(t, cmd)
+
+	_, ok := cmd().(tea.QuitMsg)
+	assert.True(t, ok, "the second q quits")
+}
+
+func TestQuitConfirmationIsCancelledByAnyOtherKey(t *testing.T) {
+	t.Parallel()
+
+	m := loadedModel()
+	m.selected[keyOf(m.prs[0])] = true
+
+	armed, _ := m.handleListKeyByString("q")
+	moved, _ := armed.handleListKeyByString("j")
+	assert.False(t, moved.quitArmed)
+	assert.NotContains(t, moved.footerText(), "q again")
+
+	again, cmd := moved.handleListKeyByString("q")
+	assert.Nil(t, cmd, "after another key the first q asks again")
+	assert.True(t, again.quitArmed)
+}
+
+func TestQuitWithoutASelectionIsImmediate(t *testing.T) {
+	t.Parallel()
+
+	_, cmd := loadedModel().handleListKeyByString("q")
+	require.NotNil(t, cmd)
+
+	_, ok := cmd().(tea.QuitMsg)
+	assert.True(t, ok)
+}
+
+func TestCtrlCQuitsEvenWithASelection(t *testing.T) {
+	t.Parallel()
+
+	m := loadedModel()
+	m.selected[keyOf(m.prs[0])] = true
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	require.NotNil(t, cmd)
+
+	_, ok := cmd().(tea.QuitMsg)
+	assert.True(t, ok)
+}
+
+func wheel(button tea.MouseButton) tea.MouseMsg {
+	return tea.MouseMsg{Action: tea.MouseActionPress, Button: button}
+}
+
+func TestMouseWheelMovesTheCursor(t *testing.T) {
+	t.Parallel()
+
+	m := pagedModel()
+
+	updated, _ := m.Update(wheel(tea.MouseButtonWheelDown))
+	down, ok := updated.(Model)
+	require.True(t, ok)
+	assert.Equal(t, wheelStep, down.table.Cursor())
+
+	updated, _ = down.Update(wheel(tea.MouseButtonWheelUp))
+	up, ok := updated.(Model)
+	require.True(t, ok)
+	assert.Zero(t, up.table.Cursor())
+}
+
+func TestMouseWheelNearTheBottomLoadsMore(t *testing.T) {
+	t.Parallel()
+
+	m := pagedModel()
+	m.table.SetCursor(50 - loadMoreMargin - wheelStep)
+
+	updated, cmd := m.Update(wheel(tea.MouseButtonWheelDown))
+	scrolled, ok := updated.(Model)
+	require.True(t, ok)
+
+	assert.True(t, scrolled.loadingMore)
+	assert.NotNil(t, cmd)
+}
+
+func TestMouseIgnoresEverythingButWheelPresses(t *testing.T) {
+	t.Parallel()
+
+	for name, msg := range map[string]tea.MouseMsg{
+		"left click":    {Action: tea.MouseActionPress, Button: tea.MouseButtonLeft},
+		"wheel release": {Action: tea.MouseActionRelease, Button: tea.MouseButtonWheelDown},
+		"motion":        {Action: tea.MouseActionMotion, Button: tea.MouseButtonWheelDown},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			updated, cmd := pagedModel().Update(msg)
+			unchanged, ok := updated.(Model)
+			require.True(t, ok)
+
+			assert.Zero(t, unchanged.table.Cursor())
+			assert.Nil(t, cmd)
+		})
+	}
+}
+
+func TestMouseWheelScrollsTheConfirmList(t *testing.T) {
+	t.Parallel()
+
+	updated, _ := bigConfirmModel().Update(wheel(tea.MouseButtonWheelDown))
+	scrolled, ok := updated.(Model)
+	require.True(t, ok)
+
+	assert.Positive(t, scrolled.pane.YOffset)
+	assert.Equal(t, screenConfirm, scrolled.screen)
+}
+
+func TestMouseWheelIsIgnoredWhilePrompting(t *testing.T) {
+	t.Parallel()
+
+	m := pagedModel()
+	m.screen = screenFilter
+
+	updated, _ := m.Update(wheel(tea.MouseButtonWheelDown))
+	same, ok := updated.(Model)
+	require.True(t, ok)
+
+	assert.Zero(t, same.table.Cursor())
+}

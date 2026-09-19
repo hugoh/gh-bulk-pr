@@ -52,11 +52,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		return m, cmd
 
-	case tea.KeyMsg:
-		if msg.String() == keyCtrlC {
-			return m, tea.Quit
-		}
+	case tea.MouseMsg:
+		return m.handleMouse(msg)
 
+	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
 
@@ -72,6 +71,56 @@ func (m Model) handleHistoryLoaded(msg historyLoadedMsg) Model {
 	}
 
 	return m
+}
+
+// wheelStep is how many rows one wheel notch moves the list cursor.
+const wheelStep = 3
+
+// wheelDelta is the cursor movement for a wheel button: rows down, negative
+// for up, 0 for any other button.
+func wheelDelta(button tea.MouseButton) int {
+	if button == tea.MouseButtonWheelUp {
+		return -wheelStep
+	}
+
+	if button == tea.MouseButtonWheelDown {
+		return wheelStep
+	}
+
+	return 0
+}
+
+// handleMouse scrolls with the wheel (only when started with --mouse): the
+// list cursor, or the confirm/results pane. Everything else is ignored.
+func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
+	if msg.Action != tea.MouseActionPress {
+		return m, nil
+	}
+
+	if m.screen == screenConfirm {
+		return m.scrollPane(msg, m.confirmBody()), nil
+	}
+
+	if m.screen == screenResults && m.results != nil {
+		return m.scrollPane(msg, m.resultsBody()), nil
+	}
+
+	if m.screen != screenList {
+		return m, nil
+	}
+
+	delta := wheelDelta(msg.Button)
+	if delta == 0 {
+		return m, nil
+	}
+
+	if delta < 0 {
+		m.table.MoveUp(-delta)
+	} else {
+		m.table.MoveDown(delta)
+	}
+
+	return m.maybeLoadMore()
 }
 
 func (m Model) spinnerActive() bool {
@@ -270,6 +319,10 @@ func survivingSelection(selected map[prKey]bool, prs []github.PR) map[prKey]bool
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+	if msg.String() == keyCtrlC {
+		return m, tea.Quit
+	}
+
 	switch m.screen {
 	case screenList:
 		return m.handleListKey(msg)
@@ -353,10 +406,12 @@ func (m Model) runQuery(query string) (Model, tea.Cmd) {
 
 func (m Model) handleListKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	keys := m.keys
+	armed := m.quitArmed
+	m.quitArmed = false
 
 	switch {
 	case key.Matches(msg, keys.Quit):
-		return m, tea.Quit
+		return m.requestQuit(armed)
 	case key.Matches(msg, keys.Filter):
 		return m.startFilter()
 	case key.Matches(msg, keys.Help):
@@ -386,6 +441,18 @@ func (m Model) handleListKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	m, more := m.maybeLoadMore()
 
 	return m, tea.Batch(cmd, more)
+}
+
+// requestQuit quits at once, unless PRs are selected: then the first q asks
+// for a second (any other key cancels), so a stray q doesn't lose the selection.
+func (m Model) requestQuit(armed bool) (Model, tea.Cmd) {
+	if len(m.selected) > 0 && !armed {
+		m.quitArmed = true
+
+		return m, nil
+	}
+
+	return m, tea.Quit
 }
 
 func (m Model) handleCommandKey(msg tea.KeyMsg) (Model, tea.Cmd) {
@@ -552,17 +619,23 @@ func (m Model) enterConfirm() Model {
 
 // scrollPane scrolls the confirm/results list for keys that aren't the
 // screen's own: j/k, arrows, page keys via the viewport, plus g/G for top and bottom.
-func (m Model) scrollPane(msg tea.KeyMsg, body string) Model {
+func (m Model) scrollPane(msg tea.Msg, body string) Model {
 	m.pane.SetContent(body)
 
-	switch msg.String() {
-	case "g", "home":
-		m.pane.GotoTop()
-	case "G", "end":
-		m.pane.GotoBottom()
-	default:
-		m.pane, _ = m.pane.Update(msg)
+	if pressed, isKey := msg.(tea.KeyMsg); isKey {
+		switch pressed.String() {
+		case "g", "home":
+			m.pane.GotoTop()
+
+			return m
+		case "G", "end":
+			m.pane.GotoBottom()
+
+			return m
+		}
 	}
+
+	m.pane, _ = m.pane.Update(msg)
 
 	return m
 }

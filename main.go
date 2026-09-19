@@ -22,6 +22,11 @@ func main() {
 		ui.DefaultQuery,
 		"GitHub search query for the PR list",
 	)
+	mouse := flag.Bool(
+		"mouse",
+		false,
+		"scroll with the mouse wheel (the terminal then needs shift to select text)",
+	)
 	showVersion := flag.Bool("version", false, "print version and exit")
 
 	flag.Parse()
@@ -40,7 +45,12 @@ func main() {
 
 	model := ui.New(client, *query).WithHistory(history.New(history.DefaultPath()))
 
-	if _, err := tea.NewProgram(model, tea.WithAltScreen()).Run(); err != nil {
+	options := []tea.ProgramOption{tea.WithAltScreen()}
+	if *mouse {
+		options = append(options, tea.WithMouseCellMotion())
+	}
+
+	if _, err := tea.NewProgram(model, options...).Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "gh-bulk-pr:", err)
 		os.Exit(1)
 	}

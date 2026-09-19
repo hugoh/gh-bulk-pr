@@ -89,6 +89,7 @@ type Model struct {
 
 	cancelMore context.CancelFunc // stops the further page being fetched, if any
 
+	quitArmed   bool // q was pressed with a selection; a second q quits
 	previewOpen bool
 	err         error
 	moreErr     error // last failure loading a further page; the list stays usable
