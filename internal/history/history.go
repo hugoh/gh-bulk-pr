@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 )
 
 const (
@@ -60,4 +62,33 @@ func (l *Log) Add(query string) error {
 	l.last = query
 
 	return nil
+}
+
+// Load returns the logged queries, oldest first, each one once at its most
+// recent use. A missing or unreadable file is an empty history.
+func (l *Log) Load() []string {
+	if l == nil {
+		return nil
+	}
+
+	data, err := os.ReadFile(l.path)
+	if err != nil {
+		return nil
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	seen := map[string]bool{}
+
+	var newestFirst []string
+
+	for _, query := range slices.Backward(lines) {
+		if query != "" && !seen[query] {
+			seen[query] = true
+			newestFirst = append(newestFirst, query)
+		}
+	}
+
+	slices.Reverse(newestFirst)
+
+	return newestFirst
 }

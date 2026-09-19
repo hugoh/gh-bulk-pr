@@ -417,7 +417,7 @@ func TestRowsFor(t *testing.T) {
 	t.Parallel()
 
 	prs := testPRs()
-	rows := rowsFor(prs, map[prKey]bool{keyOf(prs[1]): true})
+	rows := rowsFor(prs, map[prKey]bool{keyOf(prs[1]): true}, true)
 
 	require.Len(t, rows, 2)
 	assert.Equal(t, " ", rows[0][0])
@@ -703,4 +703,207 @@ func TestQueryChangesAreRecorded(t *testing.T) {
 		"is:open is:pr archived:false owner:@me\nis:open is:pr author:hugoh\n",
 		string(got),
 	)
+}
+
+func reloaded(t *testing.T, m Model) (Model, tea.Cmd) {
+	t.Helper()
+
+	return m.reload()
+}
+
+func TestSearchIgnoresStaleResults(t *testing.T) {
+	t.Parallel()
+
+	m := loadedModel()
+	m, _ = reloaded(t, m)
+	firstID := m.searchID
+	m, _ = reloaded(t, m)
+	require.Greater(t, m.searchID, firstID)
+
+	m = m.handleSearchDone(
+		searchDoneMsg{id: firstID, prs: []github.PR{{Number: 99, Repo: testRepoA}}},
+	)
+
+	assert.True(t, m.loading, "stale result must not end the loading state")
+	assert.Equal(t, testPRs(), m.prs, "stale result must not replace the list")
+}
+
+func TestReloadCancelsPreviousSearch(t *testing.T) {
+	t.Parallel()
+
+	canceled := false
+	m := loadedModel()
+	m.cancel = func() { canceled = true }
+
+	_, _ = reloaded(t, m)
+
+	assert.True(t, canceled)
+}
+
+func TestTabSwitchUsesCache(t *testing.T) {
+	t.Parallel()
+
+	m := New(nil, tabs()[0].query)
+	m = m.handleSearchDone(searchDoneMsg{query: tabs()[0].query, prs: testPRs()})
+
+	m, _ = m.handleListKeyByString("2")
+	assert.Empty(t, m.prs, "uncached tab starts empty rather than showing another query's rows")
+	assert.Empty(t, m.table.Rows())
+
+	other := []github.PR{{Number: 5, Title: "Mine", Repo: testRepoA, Author: testAuthor}}
+	m = m.handleSearchDone(searchDoneMsg{id: m.searchID, query: tabs()[1].query, prs: other})
+
+	m, cmd := m.handleListKeyByString("1")
+	assert.Equal(t, testPRs(), m.prs, "cached rows show immediately")
+	assert.Len(t, m.table.Rows(), 2)
+	assert.True(t, m.loading, "cached tab still refreshes in the background")
+	require.NotNil(t, cmd)
+}
+
+func TestRefreshKeepsSelectionOfSurvivingPRs(t *testing.T) {
+	t.Parallel()
+
+	m := loadedModel()
+	m.selected[keyOf(m.prs[0])] = true
+	m.selected[keyOf(m.prs[1])] = true
+
+	m = m.handleSearchDone(searchDoneMsg{prs: testPRs()[:1]})
+
+	assert.Equal(t, map[prKey]bool{keyOf(testPRs()[0]): true}, m.selected)
+}
+
+func TestTabSwitchClearsSelection(t *testing.T) {
+	t.Parallel()
+
+	m := loadedModel()
+	m.selected[keyOf(m.prs[0])] = true
+
+	m, _ = m.handleListKeyByString("2")
+
+	assert.Empty(t, m.selected)
+}
+
+func TestFinishingActionForcesFullReload(t *testing.T) {
+	t.Parallel()
+
+	m := loadedModel()
+	m.cache[m.query] = m.prs
+	m.screen = screenResults
+	m.results = []worker.Result{{}}
+
+	m, _ = m.handleResultsKey(tea.KeyMsg{Type: tea.KeyEnter})
+
+	assert.Empty(t, m.prs, "acted-on PRs must not linger as stale rows")
+	assert.Empty(t, m.selected)
+	assert.NotContains(t, m.cache, m.query)
+	assert.True(t, m.loading)
+}
+
+func TestLightSearchThenFull(t *testing.T) {
+	t.Parallel()
+
+	light := []github.PR{{Number: 1, Title: "Fix bug", Repo: testRepoA, Author: testAuthor}}
+
+	m := New(nil, "q")
+
+	m = m.handleSearchDone(searchDoneMsg{light: true, prs: light})
+	assert.Equal(t, light, m.prs, "light result paints the list")
+	assert.True(t, m.loading, "still waiting for the full result")
+	assert.False(t, m.detailed)
+	assert.Equal(t, "…", m.table.Rows()[0][4], "checks column is a placeholder until details land")
+	assert.Equal(t, "…", m.table.Rows()[0][5], "merge column is a placeholder until details land")
+
+	m = m.handleSearchDone(searchDoneMsg{prs: testPRs()})
+	assert.Equal(t, testPRs(), m.prs)
+	assert.False(t, m.loading)
+	assert.True(t, m.detailed)
+
+	m = m.handleSearchDone(searchDoneMsg{light: true, prs: light})
+	assert.Equal(t, testPRs(), m.prs, "late light result must not clobber the full one")
+}
+
+func TestLightSearchErrorIsIgnored(t *testing.T) {
+	t.Parallel()
+
+	m := New(nil, "q")
+	m = m.handleSearchDone(searchDoneMsg{light: true, err: assert.AnError})
+
+	require.NoError(t, m.err)
+	assert.True(t, m.loading)
+}
+
+func TestReloadKeepsRowsAndSkipsLightPass(t *testing.T) {
+	t.Parallel()
+
+	m := loadedModel()
+	m, _ = reloaded(t, m)
+
+	assert.Equal(t, testPRs(), m.prs, "refresh keeps showing the current rows")
+	assert.True(t, m.detailed)
+}
+
+func TestReloadWithoutRowsResetsDetailed(t *testing.T) {
+	t.Parallel()
+
+	m := New(nil, "q")
+	m.detailed = true
+	m, _ = reloaded(t, m)
+
+	assert.False(t, m.detailed)
+}
+
+func TestFilterHistoryRecall(t *testing.T) {
+	t.Parallel()
+
+	log := history.New(filepath.Join(t.TempDir(), "history"))
+	for _, query := range []string{"first", "second", "third"} {
+		require.NoError(t, log.Add(query))
+	}
+
+	m := loadedModel().WithHistory(log)
+	m, _ = m.handleListKeyByString("/")
+	m.filterInput.SetValue("draft")
+
+	press := func(m Model, keyType tea.KeyType) Model {
+		m, _ = m.handleFilterKey(tea.KeyMsg{Type: keyType})
+
+		return m
+	}
+
+	m = press(m, tea.KeyUp)
+	assert.Equal(t, "third", m.filterInput.Value())
+	m = press(m, tea.KeyUp)
+	m = press(m, tea.KeyUp)
+	assert.Equal(t, "first", m.filterInput.Value())
+	m = press(m, tea.KeyUp)
+	assert.Equal(t, "first", m.filterInput.Value(), "stops at the oldest entry")
+
+	m = press(m, tea.KeyDown)
+	assert.Equal(t, "second", m.filterInput.Value())
+	m = press(m, tea.KeyDown)
+	m = press(m, tea.KeyDown)
+	assert.Equal(t, "draft", m.filterInput.Value(), "going past the newest restores what was typed")
+	m = press(m, tea.KeyDown)
+	assert.Equal(t, "draft", m.filterInput.Value())
+}
+
+func TestFilterHistoryRecall_NoHistory(t *testing.T) {
+	t.Parallel()
+
+	m, _ := loadedModel().handleListKeyByString("/")
+	m, _ = m.handleFilterKey(tea.KeyMsg{Type: tea.KeyUp})
+
+	assert.Equal(t, m.query, m.filterInput.Value())
+}
+
+func TestStartFilterPutsCursorAtEnd(t *testing.T) {
+	t.Parallel()
+
+	m := loadedModel()
+	m.filterInput.SetValue("abc")
+	m.filterInput.SetCursor(1)
+
+	m, _ = m.handleListKeyByString("/")
+
+	assert.Equal(t, len(m.query), m.filterInput.Position())
 }

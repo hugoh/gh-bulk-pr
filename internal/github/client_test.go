@@ -18,9 +18,9 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
-func jsonResponse(status int, body string) *http.Response {
+func jsonResponse(body string) *http.Response {
 	return &http.Response{
-		StatusCode: status,
+		StatusCode: http.StatusOK,
 		Body:       io.NopCloser(bytes.NewBufferString(body)),
 		Header:     make(http.Header),
 	}
@@ -97,7 +97,7 @@ func TestClientActions(t *testing.T) {
 					_, _ = io.Copy(&gotBody, r.Body)
 				}
 
-				return jsonResponse(http.StatusOK, "{}"), nil
+				return jsonResponse("{}"), nil
 			})
 
 			client := &Client{rest: rest}
@@ -175,7 +175,7 @@ func TestSearchPRs(t *testing.T) {
 			cursor = "cursor1"
 		}
 
-		return jsonResponse(http.StatusOK, fmt.Sprintf(searchResponseJSON, hasNext, cursor)), nil
+		return jsonResponse(fmt.Sprintf(searchResponseJSON, hasNext, cursor)), nil
 	})
 
 	client := &Client{gql: gql}
@@ -201,7 +201,7 @@ func TestSearchPRs_LimitStopsPagination(t *testing.T) {
 	t.Parallel()
 
 	gql := newTestGraphQLClient(t, func(*http.Request) (*http.Response, error) {
-		return jsonResponse(http.StatusOK, fmt.Sprintf(searchResponseJSON, true, "cursor1")), nil
+		return jsonResponse(fmt.Sprintf(searchResponseJSON, true, "cursor1")), nil
 	})
 
 	client := &Client{gql: gql}
@@ -222,4 +222,27 @@ func TestSearchPRs_TransportError(t *testing.T) {
 
 	_, err := client.SearchPRs(context.Background(), "is:open is:pr", 10)
 	require.Error(t, err)
+}
+
+func TestSearchPRsLight_SkipsExpensiveFields(t *testing.T) {
+	t.Parallel()
+
+	var sent string
+
+	gql := newTestGraphQLClient(t, func(r *http.Request) (*http.Response, error) {
+		body, _ := io.ReadAll(r.Body)
+		sent = string(body)
+
+		return jsonResponse(fmt.Sprintf(searchResponseJSON, false, "")), nil
+	})
+
+	prs, err := (&Client{gql: gql}).SearchPRsLight(context.Background(), "is:open is:pr", 10)
+	require.NoError(t, err)
+	require.Len(t, prs, 1)
+	assert.Equal(t, "Fix bug", prs[0].Title)
+	assert.Equal(t, "hugoh/r", prs[0].Repo)
+
+	for _, field := range []string{"mergeStateStatus", "statusCheckRollup", "reviewRequests", "labels"} {
+		assert.NotContains(t, sent, field)
+	}
 }

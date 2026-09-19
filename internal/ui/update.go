@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"sync/atomic"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -10,8 +11,9 @@ import (
 )
 
 const (
-	keyEnter = "enter"
-	keyEsc   = "esc"
+	keyEnter    = "enter"
+	keyEsc      = "esc"
+	pendingCell = "…"
 )
 
 // Update handles bubbletea messages: window resizes, search/action results,
@@ -96,16 +98,50 @@ func (m Model) handleActionProgress() (Model, tea.Cmd) {
 }
 
 func (m Model) handleSearchDone(msg searchDoneMsg) Model {
+	if msg.id != m.searchID {
+		return m
+	}
+
+	if msg.light {
+		return m.handleLightDone(msg)
+	}
+
 	m.loading = false
 	m.err = msg.err
 
 	if msg.err == nil {
 		m.prs = msg.prs
-		m.selected = map[prKey]bool{}
+		m.detailed = true
+		m.cache[msg.query] = msg.prs
+		m.selected = survivingSelection(m.selected, m.prs)
 		m = m.refreshRows()
 	}
 
 	return m
+}
+
+// handleLightDone paints the first-pass rows unless the full result already
+// arrived; its errors are left for the full search to report.
+func (m Model) handleLightDone(msg searchDoneMsg) Model {
+	if m.detailed || msg.err != nil {
+		return m
+	}
+
+	m.prs = msg.prs
+
+	return m.refreshRows()
+}
+
+func survivingSelection(selected map[prKey]bool, prs []github.PR) map[prKey]bool {
+	kept := map[prKey]bool{}
+
+	for _, pr := range prs {
+		if selected[keyOf(pr)] {
+			kept[keyOf(pr)] = true
+		}
+	}
+
+	return kept
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
@@ -128,6 +164,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 func (m Model) handleResultsKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	if msg.String() == keyEnter || msg.String() == keyEsc {
 		m.screen = screenList
+		m.prs = nil
+		m.selected = map[prKey]bool{}
+		delete(m.cache, m.query)
+		m = m.refreshRows()
 
 		return m.reload()
 	}
@@ -135,10 +175,24 @@ func (m Model) handleResultsKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	return m, nil
 }
 
+// reload starts a fresh search for the current query, cancelling any still
+// running. Rows already on screen stay until the new result replaces them.
 func (m Model) reload() (Model, tea.Cmd) {
-	m.loading = true
+	if m.cancel != nil {
+		m.cancel()
+	}
 
-	return m, tea.Batch(m.search(m.query), m.spinner.Tick)
+	if len(m.prs) == 0 {
+		m.detailed = false
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	m.cancel = cancel
+	m.searchID++
+	m.loading = true
+	m.err = nil
+
+	return m, m.searchCmds(ctx)
 }
 
 // runQuery makes query current, selecting the tab it matches (if any),
@@ -147,6 +201,11 @@ func (m Model) runQuery(query string) (Model, tea.Cmd) {
 	m.query = query
 	m.tab = tabFor(query)
 	_ = m.history.Add(query) // best effort: history must never block a search
+
+	m.prs = m.cache[query]
+	m.detailed = len(m.prs) > 0
+	m.selected = map[prKey]bool{}
+	m = m.refreshRows()
 
 	return m.reload()
 }
@@ -195,7 +254,10 @@ func (m Model) handleCommandKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 func (m Model) startFilter() (Model, tea.Cmd) {
 	m.screen = screenFilter
 	m.filterInput.SetValue(m.query)
+	m.filterInput.CursorEnd()
 	m.filterInput.Focus()
+	m.filterHistory = m.history.Load()
+	m.filterPos = len(m.filterHistory)
 
 	return m, nil
 }
@@ -271,6 +333,10 @@ func (m Model) handleFilterKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.screen = screenList
 
 		return m, nil
+	case "up":
+		return m.recallHistory(-1), nil
+	case "down":
+		return m.recallHistory(1), nil
 	}
 
 	var cmd tea.Cmd
@@ -278,6 +344,32 @@ func (m Model) handleFilterKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	m.filterInput, cmd = m.filterInput.Update(msg)
 
 	return m, cmd
+}
+
+// recallHistory moves through the past queries by step (-1 older, +1 newer)
+// and puts the result in the filter bar; past the newest it restores the
+// text that was being typed.
+func (m Model) recallHistory(step int) Model {
+	next := m.filterPos + step
+	if next < 0 || next > len(m.filterHistory) {
+		return m
+	}
+
+	if m.filterPos == len(m.filterHistory) {
+		m.filterDraft = m.filterInput.Value()
+	}
+
+	m.filterPos = next
+
+	value := m.filterDraft
+	if next < len(m.filterHistory) {
+		value = m.filterHistory[next]
+	}
+
+	m.filterInput.SetValue(value)
+	m.filterInput.CursorEnd()
+
+	return m
 }
 
 func (m Model) handleActionInputKey(msg tea.KeyMsg) (Model, tea.Cmd) {
@@ -352,12 +444,14 @@ func (m Model) selectedPRs() []github.PR {
 }
 
 func (m Model) refreshRows() Model {
-	m.table.SetRows(rowsFor(m.prs, m.selected))
+	m.table.SetRows(rowsFor(m.prs, m.selected, m.detailed))
 
 	return m
 }
 
-func rowsFor(prs []github.PR, selected map[prKey]bool) []table.Row {
+// rowsFor builds the table rows; until detailed, the checks and merge cells
+// are placeholders because the light search doesn't fetch them.
+func rowsFor(prs []github.PR, selected map[prKey]bool, detailed bool) []table.Row {
 	rows := make([]table.Row, len(prs))
 	for idx, entry := range prs {
 		mark := " "
@@ -365,13 +459,18 @@ func rowsFor(prs []github.PR, selected map[prKey]bool) []table.Row {
 			mark = "x"
 		}
 
+		checks, merge := pendingCell, pendingCell
+		if detailed {
+			checks, merge = checksSummary(entry), mergeLabel(entry.MergeState)
+		}
+
 		rows[idx] = table.Row{
 			mark,
 			entry.Repo,
 			prNumber(entry.Number),
 			entry.Title,
-			checksSummary(entry),
-			mergeLabel(entry.MergeState),
+			checks,
+			merge,
 			entry.Author,
 		}
 	}

@@ -53,19 +53,31 @@ func NewClient() (*Client, error) {
 	return &Client{gql: gql, rest: rest}, nil
 }
 
-const searchQuery = `
+const (
+	searchQueryHead = `
 query($q: String!, $count: Int!, $after: String) {
   search(query: $q, type: ISSUE, first: $count, after: $after) {
     pageInfo { hasNextPage endCursor }
     nodes {
-      ... on PullRequest {
+      ... on PullRequest {`
+	searchQueryTail = `
+      }
+    }
+  }
+}`
+
+	// lightFields is enough to paint the list; GitHub answers it about twice
+	// as fast as the full set because it skips merge state and check rollups.
+	lightFields = `
         number
         title
         url
+        repository { nameWithOwner }
+        author { login }`
+
+	fullFields = lightFields + `
         body
         mergeStateStatus
-        repository { nameWithOwner }
-        author { login }
         labels(first: 20) { nodes { name } }
         reviewRequests(first: 20) { nodes { requestedReviewer {
           ... on User { login }
@@ -73,11 +85,8 @@ query($q: String!, $count: Int!, $after: String) {
         } } }
         commits(last: 1) {
           nodes { commit { statusCheckRollup { state } } }
-        }
-      }
-    }
-  }
-}`
+        }`
+)
 
 type searchResponse struct {
 	Search struct {
@@ -122,37 +131,13 @@ const searchPageSize = 50
 // SearchPRs runs a GitHub search query (e.g. "is:open is:pr involves:@me")
 // and returns up to limit matching pull requests, paging through results.
 func (c *Client) SearchPRs(ctx context.Context, query string, limit int) ([]PR, error) {
-	var prs []PR
+	return c.search(ctx, searchQueryHead+fullFields+searchQueryTail, query, limit)
+}
 
-	var after *string
-
-	for {
-		var resp searchResponse
-
-		vars := map[string]any{
-			"q":     query,
-			"count": searchPageSize,
-			"after": after,
-		}
-		if err := c.gql.DoWithContext(ctx, searchQuery, vars, &resp); err != nil {
-			return nil, fmt.Errorf("search prs: %w", err)
-		}
-
-		for _, node := range resp.Search.Nodes {
-			prs = append(prs, prFromNode(node))
-			if len(prs) >= limit {
-				return prs, nil
-			}
-		}
-
-		if !resp.Search.PageInfo.HasNextPage {
-			break
-		}
-
-		after = &resp.Search.PageInfo.EndCursor
-	}
-
-	return prs, nil
+// SearchPRsLight is SearchPRs without labels, reviewers, body, checks and
+// merge state: fast enough to paint the list while SearchPRs is still running.
+func (c *Client) SearchPRsLight(ctx context.Context, query string, limit int) ([]PR, error) {
+	return c.search(ctx, searchQueryHead+lightFields+searchQueryTail, query, limit)
 }
 
 func prFromNode(node searchNode) PR {
@@ -209,6 +194,40 @@ func (c *Client) MergePR(ctx context.Context, pr PR) error {
 	return c.do(ctx, "merge pr", http.MethodPut,
 		fmt.Sprintf("repos/%s/pulls/%d/merge", pr.Repo, pr.Number),
 		map[string]string{"merge_method": "squash"})
+}
+
+func (c *Client) search(ctx context.Context, gqlQuery, query string, limit int) ([]PR, error) {
+	var prs []PR
+
+	var after *string
+
+	for {
+		var resp searchResponse
+
+		vars := map[string]any{
+			"q":     query,
+			"count": searchPageSize,
+			"after": after,
+		}
+		if err := c.gql.DoWithContext(ctx, gqlQuery, vars, &resp); err != nil {
+			return nil, fmt.Errorf("search prs: %w", err)
+		}
+
+		for _, node := range resp.Search.Nodes {
+			prs = append(prs, prFromNode(node))
+			if len(prs) >= limit {
+				return prs, nil
+			}
+		}
+
+		if !resp.Search.PageInfo.HasNextPage {
+			break
+		}
+
+		after = &resp.Search.PageInfo.EndCursor
+	}
+
+	return prs, nil
 }
 
 func (c *Client) do(ctx context.Context, what, method, path string, body any) error {

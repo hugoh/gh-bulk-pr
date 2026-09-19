@@ -42,10 +42,16 @@ type Model struct {
 	tab     int // index into tabs, or noTab when query matches none
 	history *history.Log
 
+	filterHistory []string // past queries, oldest first, loaded when the filter bar opens
+	filterPos     int      // index into filterHistory; len means the draft being typed
+	filterDraft   string
+
 	table       table.Model
 	filterInput textinput.Model
 	actionInput textinput.Model
 	prs         []github.PR
+	cache       map[string][]github.PR // last full result per query
+	detailed    bool                   // prs carry checks/merge state, not just the light fields
 	selected    map[prKey]bool
 
 	screen    screen
@@ -58,6 +64,9 @@ type Model struct {
 	progress    progress.Model
 	actionDone  *atomic.Int32
 	actionTotal int
+
+	searchID int // identifies the latest search; older results are dropped
+	cancel   context.CancelFunc
 
 	previewOpen bool
 	err         error
@@ -131,6 +140,7 @@ func New(client *github.Client, query string) Model {
 		filterInput: filterTI,
 		actionInput: actionTI,
 		selected:    map[prKey]bool{},
+		cache:       map[string][]github.PR{},
 		loading:     true,
 		spinner:     spin,
 		progress:    prog,
@@ -146,5 +156,5 @@ func (m Model) WithHistory(h *history.Log) Model {
 
 // Init kicks off the first PR search and starts the loading spinner.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.search(m.query), m.spinner.Tick)
+	return m.searchCmds(context.Background())
 }

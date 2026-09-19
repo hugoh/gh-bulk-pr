@@ -13,9 +13,14 @@ import (
 
 const progressPollInterval = 150 * time.Millisecond
 
+// searchDoneMsg carries one search result. id and query say which search it
+// answers; light marks the fast first pass that lacks checks and merge state.
 type searchDoneMsg struct {
-	prs []github.PR
-	err error
+	id    int
+	query string
+	light bool
+	prs   []github.PR
+	err   error
 }
 
 type actionDoneMsg struct {
@@ -24,11 +29,29 @@ type actionDoneMsg struct {
 
 type actionProgressMsg struct{}
 
-func (m Model) search(query string) tea.Cmd {
-	return func() tea.Msg {
-		prs, err := m.client.SearchPRs(context.Background(), query, maxBatchSize)
+// searchCmds runs the full search and, when there are no rows to show yet,
+// a light one alongside it so the list paints sooner. Both stop with ctx.
+func (m Model) searchCmds(ctx context.Context) tea.Cmd {
+	cmds := []tea.Cmd{m.spinner.Tick, m.runSearch(ctx, false)}
+	if len(m.prs) == 0 {
+		cmds = append(cmds, m.runSearch(ctx, true))
+	}
 
-		return searchDoneMsg{prs: prs, err: err}
+	return tea.Batch(cmds...)
+}
+
+func (m Model) runSearch(ctx context.Context, light bool) tea.Cmd {
+	client, query, searchID := m.client, m.query, m.searchID
+
+	return func() tea.Msg {
+		fetch := client.SearchPRs
+		if light {
+			fetch = client.SearchPRsLight
+		}
+
+		prs, err := fetch(ctx, query, maxBatchSize)
+
+		return searchDoneMsg{id: searchID, query: query, light: light, prs: prs, err: err}
 	}
 }
 

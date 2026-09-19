@@ -201,7 +201,7 @@ func (m Model) View() string {
 		return m.viewList()
 	case screenFilter:
 		return "Search: " + m.filterInput.View() + "\n" + helpStyle().Render(
-			"enter to run · esc to cancel",
+			"enter to run · ↑/↓ history · esc to cancel",
 		)
 	case screenActionInput:
 		return "Label: " + m.actionInput.View() + "\n" + helpStyle().Render(
@@ -220,7 +220,7 @@ func (m Model) viewList() string {
 	header := headerStyle().Render("gh-bulk-pr") +
 		"  " + m.tabBar() + "  " + helpStyle().Render(m.query)
 
-	if m.loading {
+	if m.loading && len(m.prs) == 0 {
 		return header + "\n\n" + m.spinner.View() + " loading…"
 	}
 
@@ -230,6 +230,10 @@ func (m Model) viewList() string {
 
 	if summary := mergeSummary(m.prs); summary != "" {
 		header += "  " + helpStyle().Render(summary)
+	}
+
+	if m.loading {
+		header += "  " + m.spinner.View() + helpStyle().Render(" refreshing…")
 	}
 
 	list := colorMerge(colorChecks(m.table.View()), m.table.Columns())

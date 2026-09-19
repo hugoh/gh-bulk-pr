@@ -40,7 +40,7 @@ gh bulk-pr --query "is:open is:pr author:@me archived:false"
 
 Both tabs share the base query `is:open is:pr archived:false`. Editing the query with `/` deselects the tab unless it still matches one.
 
-Queries run from the filter bar or a tab are appended to `$XDG_STATE_HOME/gh-bulk-pr/history` (`~/.local/state/gh-bulk-pr/history`).
+Queries run from the filter bar or a tab are appended to `$XDG_STATE_HOME/gh-bulk-pr/history` (`~/.local/state/gh-bulk-pr/history`). Press `↑`/`↓` in the search field to recall them.
 
 Every action asks for confirmation (`y`/`enter` or `n`/`esc`) before running.
 

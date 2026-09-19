@@ -358,3 +358,13 @@ func TestPreviewMerge(t *testing.T) {
 	assert.Equal(t, "merge: conflict", ansi.Strip(previewMerge(github.PR{MergeState: mergeDirty})))
 	assert.Equal(t, "merge: -", ansi.Strip(previewMerge(github.PR{})))
 }
+
+func TestViewList_RefreshingKeepsRows(t *testing.T) {
+	t.Parallel()
+
+	m, _ := loadedModel().reload()
+	view := m.View()
+
+	assert.Contains(t, view, prTitleFix, "rows stay visible during a refresh")
+	assert.Contains(t, view, "refreshing")
+}

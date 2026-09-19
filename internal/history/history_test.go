@@ -45,3 +45,27 @@ func TestLog_NilIsNoop(t *testing.T) {
 
 	assert.NoError(t, log.Add("q"))
 }
+
+func TestLog_Load(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "history")
+	log := New(path)
+
+	assert.Empty(t, log.Load(), "missing file is an empty history")
+
+	for _, query := range []string{"a", "b", "a", "c"} {
+		require.NoError(t, log.Add(query))
+	}
+
+	assert.Equal(
+		t,
+		[]string{"b", "a", "c"},
+		log.Load(),
+		"oldest first, each query once at its latest use",
+	)
+
+	var nilLog *Log
+
+	assert.Empty(t, nilLog.Load())
+}
