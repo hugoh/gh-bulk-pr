@@ -15,7 +15,7 @@ func TestNeedsInput(t *testing.T) {
 		key  string
 		want bool
 	}{
-		"label":     {"l", true},
+		textLabel:   {"l", true},
 		actionClose: {"c", false},
 		actionMerge: {"m", false},
 	}
@@ -39,7 +39,7 @@ func TestActionsForKey(t *testing.T) {
 		input     string
 		wantLabel string
 	}{
-		"label":     {"l", "bug", `add label "bug"`},
+		textLabel:   {"l", "bug", `add label "bug"`},
 		actionClose: {"c", "", actionClose},
 		actionMerge: {"m", "", actionMerge},
 		"unknown":   {"z", "", ""},
@@ -73,4 +73,14 @@ func TestPollActionProgress(t *testing.T) {
 	msg := cmd()
 	_, ok := msg.(actionProgressMsg)
 	assert.True(t, ok)
+}
+
+func TestActionsForKey_Destructive(t *testing.T) {
+	t.Parallel()
+
+	client := &github.Client{}
+
+	assert.False(t, actionsForKey(client, "l", "bug").destructive, "labelling is easy to undo")
+	assert.True(t, actionsForKey(client, "c", "").destructive)
+	assert.True(t, actionsForKey(client, "m", "").destructive)
 }

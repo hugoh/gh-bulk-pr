@@ -6,17 +6,30 @@ import (
 	"context"
 	"sync/atomic"
 
+	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/hugoh/gh-bulk-pr/internal/github"
+	"github.com/hugoh/gh-bulk-pr/internal/history"
 	"github.com/hugoh/gh-bulk-pr/internal/worker"
 )
 
-const maxBatchSize = 50
+// loadMoreMargin is how close to the last loaded row the cursor gets before
+// the next page is fetched.
+const loadMoreMargin = 10
+
+// results is a fully loaded search: the rows plus what's needed to fetch more.
+type results struct {
+	prs     []github.PR
+	total   int
+	cursor  string
+	hasMore bool
+}
 
 type screen int
 
@@ -26,23 +39,37 @@ const (
 	screenActionInput
 	screenConfirm
 	screenResults
+	screenHelp
 )
 
 type pendingAction struct {
-	label string // human-readable name for the confirm/results screens
-	run   func(ctx context.Context, pr github.PR) error
+	label       string // human-readable name for the confirm/results screens
+	destructive bool   // hard to undo: only an explicit "y" confirms it, never enter
+	run         func(ctx context.Context, pr github.PR) error
 }
 
 // Model is the bubbletea model driving the PR list, preview panel, filter
 // bar, and bulk-action flow.
 type Model struct {
-	client *github.Client
-	query  string
+	client  *github.Client
+	keys    keyMap
+	help    help.Model
+	query   string
+	tab     int // index into tabs, or noTab when query matches none
+	history *history.Log
+
+	filterHistory []string // past queries, oldest first, loaded when the filter bar opens
+	filterPos     int      // index into filterHistory; len means the draft being typed
+	filterDraft   string
 
 	table       table.Model
 	filterInput textinput.Model
 	actionInput textinput.Model
 	prs         []github.PR
+	cache       map[string]results // last full result per query
+	total       int                // every match GitHub reports, loaded or not
+	endCursor   string             // where the next page starts
+	hasMore     bool
 	selected    map[prKey]bool
 
 	screen    screen
@@ -50,15 +77,27 @@ type Model struct {
 	action    *pendingAction
 	confirm   []github.PR
 	results   []worker.Result
+	pane      viewport.Model // scrolls the confirm and results lists
 
 	spinner     spinner.Model
 	progress    progress.Model
 	actionDone  *atomic.Int32
 	actionTotal int
 
+	searchID int // identifies the latest search; older results are dropped
+	cancel   context.CancelFunc
+
+	cancelMore context.CancelFunc // stops the further page being fetched, if any
+
+	open        func(url string) error // opens a URL in the browser; replaced in tests
+	notice      string                 // a one-off message for the status line, cleared by the next key
+	openArmed   bool                   // O was pressed with a large selection; a second O opens them
+	quitArmed   bool                   // q was pressed with a selection; a second q quits
 	previewOpen bool
 	err         error
-	loading     bool
+	moreErr     error // last failure loading a further page; the list stays usable
+	loading     bool  // first page of a search in flight
+	loadingMore bool  // a further page in flight
 
 	width, height int
 }
@@ -122,18 +161,38 @@ func New(client *github.Client, query string) Model {
 
 	return Model{
 		client:      client,
+		keys:        newKeyMap(),
+		open:        browse,
+		help:        newHelp(),
 		query:       query,
+		tab:         tabFor(query),
 		table:       tableModel,
 		filterInput: filterTI,
 		actionInput: actionTI,
+		pane:        viewport.New(0, 0),
 		selected:    map[prKey]bool{},
+		cache:       map[string]results{},
 		loading:     true,
 		spinner:     spin,
 		progress:    prog,
 	}
 }
 
+// WithHistory records every query run from the filter bar or a tab into h.
+func (m Model) WithHistory(h *history.Log) Model {
+	m.history = h
+
+	return m
+}
+
 // Init kicks off the first PR search and starts the loading spinner.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.search(m.query), m.spinner.Tick)
+	return m.searchCmds(context.Background())
+}
+
+func newHelp() help.Model {
+	h := help.New()
+	h.ShortSeparator = " · "
+
+	return h
 }

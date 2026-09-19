@@ -10,6 +10,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/hugoh/gh-bulk-pr/internal/github"
+	"github.com/hugoh/gh-bulk-pr/internal/history"
 	"github.com/hugoh/gh-bulk-pr/internal/ui"
 )
 
@@ -18,8 +19,13 @@ var version = "dev" // set via -ldflags by goreleaser
 func main() {
 	query := flag.String(
 		"query",
-		"is:open is:pr involves:@me archived:false",
+		ui.DefaultQuery,
 		"GitHub search query for the PR list",
+	)
+	mouse := flag.Bool(
+		"mouse",
+		false,
+		"scroll with the mouse wheel (the terminal then needs shift to select text)",
 	)
 	showVersion := flag.Bool("version", false, "print version and exit")
 
@@ -37,7 +43,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	if _, err := tea.NewProgram(ui.New(client, *query), tea.WithAltScreen()).Run(); err != nil {
+	model := ui.New(client, *query).WithHistory(history.New(history.DefaultPath()))
+
+	options := []tea.ProgramOption{tea.WithAltScreen()}
+	if *mouse {
+		options = append(options, tea.WithMouseCellMotion())
+	}
+
+	if _, err := tea.NewProgram(model, options...).Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "gh-bulk-pr:", err)
 		os.Exit(1)
 	}
