@@ -12,6 +12,7 @@ import (
 )
 
 const (
+	keyCtrlC    = "ctrl+c"
 	keyEnter    = "enter"
 	keyEsc      = "esc"
 	pendingCell = "…"
@@ -48,6 +49,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case tea.KeyMsg:
+		if msg.String() == keyCtrlC {
+			return m, tea.Quit
+		}
+
 		return m.handleKey(msg)
 	}
 
@@ -239,6 +244,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 }
 
 func (m Model) handleResultsKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+	if m.results == nil {
+		return m, nil // still running; only ctrl+c (handled in Update) leaves
+	}
+
 	if msg.String() == keyEnter || msg.String() == keyEsc {
 		m.screen = screenList
 		m = m.withResults(results{})
@@ -292,7 +301,7 @@ func (m Model) runQuery(query string) (Model, tea.Cmd) {
 
 func (m Model) handleListKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	switch msg.String() {
-	case "ctrl+c", "q":
+	case "q":
 		return m, tea.Quit
 	case "/":
 		return m.startFilter()
@@ -478,15 +487,15 @@ func (m Model) handleActionInputKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 }
 
 func (m Model) handleConfirmKey(msg tea.KeyMsg) (Model, tea.Cmd) {
-	switch msg.String() {
-	case "y", keyEnter:
+	switch key := msg.String(); {
+	case key == "y" || (key == keyEnter && !m.action.destructive):
 		m.screen = screenResults
 		m.results = nil
 		m.actionDone = new(atomic.Int32)
 		m.actionTotal = len(m.confirm)
 
 		return m, tea.Batch(m.runAction(), pollActionProgress(), m.spinner.Tick)
-	case "n", keyEsc:
+	case key == "n" || key == keyEsc:
 		m.screen = screenList
 
 		return m, nil

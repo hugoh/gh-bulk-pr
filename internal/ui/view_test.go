@@ -510,3 +510,19 @@ func TestViewConfirm_RepeatsCountAtThePrompt(t *testing.T) {
 
 	assert.Contains(t, lastLine, "confirm 2 PR(s)")
 }
+
+func TestViewConfirm_PromptMatchesTheKeysThatWork(t *testing.T) {
+	t.Parallel()
+
+	m := loadedModel()
+	m.screen = screenConfirm
+	m.confirm = testPRs()
+
+	m.action = &pendingAction{label: "add label", destructive: false}
+	assert.Contains(t, m.View(), "y/enter to confirm 2 PR(s)")
+
+	m.action = &pendingAction{label: actionMerge, destructive: true}
+	view := m.View()
+	assert.Contains(t, view, "y to confirm 2 PR(s)")
+	assert.NotContains(t, view, "y/enter")
+}

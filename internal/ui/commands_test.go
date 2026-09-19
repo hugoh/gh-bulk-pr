@@ -74,3 +74,13 @@ func TestPollActionProgress(t *testing.T) {
 	_, ok := msg.(actionProgressMsg)
 	assert.True(t, ok)
 }
+
+func TestActionsForKey_Destructive(t *testing.T) {
+	t.Parallel()
+
+	client := &github.Client{}
+
+	assert.False(t, actionsForKey(client, "l", "bug").destructive, "labelling is easy to undo")
+	assert.True(t, actionsForKey(client, "c", "").destructive)
+	assert.True(t, actionsForKey(client, "m", "").destructive)
+}

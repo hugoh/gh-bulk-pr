@@ -155,15 +155,41 @@ func TestHandleSearchDone(t *testing.T) {
 func TestHandleListKey_Quit(t *testing.T) {
 	t.Parallel()
 
-	for _, key := range []string{"ctrl+c", "q"} {
-		m := loadedModel()
+	m := loadedModel()
 
-		_, cmd := m.handleListKeyByString(key)
-		require.NotNil(t, cmd)
+	_, cmd := m.handleListKeyByString("q")
+	require.NotNil(t, cmd)
 
-		msg := cmd()
-		_, ok := msg.(tea.QuitMsg)
-		assert.True(t, ok, "key %q should quit", key)
+	_, ok := cmd().(tea.QuitMsg)
+	assert.True(t, ok)
+}
+
+func TestCtrlCQuitsFromEveryScreen(t *testing.T) {
+	t.Parallel()
+
+	screens := map[string]screen{
+		"list":         screenList,
+		"filter":       screenFilter,
+		"action input": screenActionInput,
+		"confirm":      screenConfirm,
+		"results":      screenResults,
+	}
+
+	for name, current := range screens {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := loadedModel()
+			m.screen = current
+			m.action = &pendingAction{label: actionClose, run: noopAction}
+			m.results = nil // a bulk action still running
+
+			_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+			require.NotNil(t, cmd)
+
+			_, ok := cmd().(tea.QuitMsg)
+			assert.True(t, ok)
+		})
 	}
 }
 
@@ -375,18 +401,61 @@ func TestHandleConfirmKey(t *testing.T) {
 	})
 }
 
+func TestHandleConfirmKey_DestructiveNeedsY(t *testing.T) {
+	t.Parallel()
+
+	for _, label := range []string{actionClose, actionMerge} {
+		t.Run(label, func(t *testing.T) {
+			t.Parallel()
+
+			m := loadedModel()
+			m.screen = screenConfirm
+			m.confirm = testPRs()
+			m.action = &pendingAction{label: label, run: noopAction, destructive: true}
+
+			same, cmd := m.handleConfirmKey(tea.KeyMsg{Type: tea.KeyEnter})
+			assert.Equal(
+				t,
+				screenConfirm,
+				same.screen,
+				"enter must not confirm an irreversible action",
+			)
+			assert.Nil(t, cmd)
+
+			started, cmd := m.handleConfirmKey(keyMsgFromString("y"))
+			assert.Equal(t, screenResults, started.screen)
+			assert.NotNil(t, cmd)
+		})
+	}
+}
+
 func TestHandleResultsKey(t *testing.T) {
 	t.Parallel()
 
 	m := loadedModel()
 	m.screen = screenResults
-	m.results = nil
+	m.results = []worker.Result{}
 
 	m, cmd := m.handleResultsKey(tea.KeyMsg{Type: tea.KeyEnter})
 
 	assert.Equal(t, screenList, m.screen)
 	assert.True(t, m.loading)
 	require.NotNil(t, cmd)
+}
+
+func TestHandleResultsKey_IgnoredWhileRunning(t *testing.T) {
+	t.Parallel()
+
+	for _, keyType := range []tea.KeyType{tea.KeyEnter, tea.KeyEsc} {
+		m := loadedModel()
+		m.screen = screenResults
+		m.results = nil
+
+		m, cmd := m.handleResultsKey(tea.KeyMsg{Type: keyType})
+
+		assert.Equal(t, screenResults, m.screen, "the screen must not change mid-run")
+		assert.Nil(t, cmd)
+	}
 }
 
 func TestFocusedPR(t *testing.T) {

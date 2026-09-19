@@ -123,9 +123,9 @@ func actionsForKey(client *github.Client, actionKey, input string) *pendingActio
 			run:   func(ctx context.Context, pr github.PR) error { return client.AddLabel(ctx, pr, input) },
 		}
 	case "c":
-		return &pendingAction{label: "close", run: client.ClosePR}
+		return &pendingAction{label: "close", destructive: true, run: client.ClosePR}
 	case "m":
-		return &pendingAction{label: "merge", run: client.MergePR}
+		return &pendingAction{label: "merge", destructive: true, run: client.MergePR}
 	}
 
 	return nil

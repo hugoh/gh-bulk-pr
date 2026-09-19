@@ -40,8 +40,9 @@ const (
 )
 
 type pendingAction struct {
-	label string // human-readable name for the confirm/results screens
-	run   func(ctx context.Context, pr github.PR) error
+	label       string // human-readable name for the confirm/results screens
+	destructive bool   // hard to undo: only an explicit "y" confirms it, never enter
+	run         func(ctx context.Context, pr github.PR) error
 }
 
 // Model is the bubbletea model driving the PR list, preview panel, filter

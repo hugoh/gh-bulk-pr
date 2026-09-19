@@ -377,8 +377,13 @@ func (m Model) viewConfirm() string {
 		fmt.Fprintf(&buf, "  %s %s  %s\n", pr.Repo, prNumber(pr.Number), pr.Title)
 	}
 
+	confirmKeys := "y/enter"
+	if m.action.destructive {
+		confirmKeys = "y"
+	}
+
 	buf.WriteString("\n" + helpStyle().Render(
-		fmt.Sprintf("y/enter to confirm %d PR(s) · n/esc to cancel", len(m.confirm)),
+		fmt.Sprintf("%s to confirm %d PR(s) · n/esc to cancel", confirmKeys, len(m.confirm)),
 	))
 
 	return buf.String()
