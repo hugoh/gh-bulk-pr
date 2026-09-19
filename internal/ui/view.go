@@ -281,8 +281,18 @@ func (m Model) viewList(footer string) string {
 	return body + strings.Repeat("\n", pad) + "\n" + footer
 }
 
+// loadMoreLine is the line under the table: a spinner while a further page is
+// being fetched, blank otherwise so the layout doesn't shift when it starts.
+func (m Model) loadMoreLine() string {
+	if !m.loadingMore {
+		return ""
+	}
+
+	return " " + m.spinner.View() + helpStyle().Render(" loading more…")
+}
+
 func (m Model) listWithPreview() string {
-	list := colorMerge(colorChecks(m.table.View()), m.table.Columns())
+	list := colorMerge(colorChecks(m.table.View()), m.table.Columns()) + "\n" + m.loadMoreLine()
 
 	if pr, ok := m.focusedPR(); ok && m.previewOpen {
 		sep := separatorStyle().Render(strings.Repeat("─", max(lipgloss.Width(list), 1)))
@@ -361,10 +371,6 @@ func (m Model) statusLine() string {
 
 	if m.loading {
 		parts = append(parts, m.spinner.View()+helpStyle().Render(" refreshing…"))
-	}
-
-	if m.loadingMore {
-		parts = append(parts, m.spinner.View()+helpStyle().Render(" loading more…"))
 	}
 
 	if m.moreErr != nil {

@@ -428,7 +428,7 @@ func TestViewList_StatusOnSecondLine(t *testing.T) {
 	assert.NotContains(t, lines[0], "312")
 	assert.NotContains(t, lines[0], "behind")
 
-	for _, want := range []string{"1 behind", "1 of 312 · 50 loaded", "loading more"} {
+	for _, want := range []string{"1 behind", "1 of 312 · 50 loaded"} {
 		assert.Contains(t, lines[1], want)
 	}
 }
@@ -946,4 +946,73 @@ func TestStylesAdaptToTheBackground(t *testing.T) {
 		lipgloss.SetHasDarkBackground(true)
 		assert.Contains(t, tt.render("x"), tt.dark, name+" on a dark background")
 	}
+}
+
+// lastTableRowLine is the index of the last line showing a PR row.
+func lastTableRowLine(lines []string) int {
+	last := -1
+
+	for i, line := range lines {
+		if strings.Contains(line, testRepoA+" ") && strings.Contains(line, "#") {
+			last = i
+		}
+	}
+
+	return last
+}
+
+func TestViewList_LoadingMoreIndicatorSitsUnderTheTable(t *testing.T) {
+	t.Parallel()
+
+	m := pagedModel()
+	m.loadingMore = true
+
+	lines := strings.Split(m.View(), "\n")
+	last := lastTableRowLine(lines)
+
+	require.Positive(t, last)
+	assert.Contains(t, lines[last+1], "loading more…", "directly under the last table row")
+	assert.NotContains(t, lines[1], "loading more", "no longer crammed into the status line")
+}
+
+func TestViewList_NoIndicatorWhenNotLoadingMore(t *testing.T) {
+	t.Parallel()
+
+	m := pagedModel()
+	lines := strings.Split(m.View(), "\n")
+	last := lastTableRowLine(lines)
+
+	require.Positive(t, last)
+	assert.Empty(
+		t,
+		strings.TrimSpace(lines[last+1]),
+		"the line is reserved, so the layout doesn't jump",
+	)
+	assert.NotContains(t, m.View(), "loading more")
+}
+
+func TestViewList_LoadingMoreDoesNotChangeTheHeight(t *testing.T) {
+	t.Parallel()
+
+	idle := pagedModel()
+	busy := pagedModel()
+	busy.loadingMore = true
+
+	assert.Equal(t, lineCount(idle.View()), lineCount(busy.View()))
+	assert.LessOrEqual(t, lineCount(busy.View()), 30)
+	assert.Equal(t, lastTableRowLine(strings.Split(idle.View(), "\n")),
+		lastTableRowLine(strings.Split(busy.View(), "\n")), "the table doesn't move")
+}
+
+func TestViewList_LoadingMoreIndicatorStaysAboveThePreview(t *testing.T) {
+	t.Parallel()
+
+	m := pagedModel()
+	m.previewOpen = true
+	m = m.syncTableHeight()
+	m.loadingMore = true
+
+	view := m.View()
+
+	assert.Less(t, strings.Index(view, "loading more…"), strings.Index(view, "───"))
 }
