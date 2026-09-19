@@ -377,6 +377,10 @@ func (m Model) statusLine() string {
 		parts = append(parts, errStyle().Render("load more failed: "+m.moreErr.Error()))
 	}
 
+	if m.notice != "" {
+		parts = append(parts, errStyle().Render(m.notice))
+	}
+
 	return m.alignRight(parts)
 }
 
@@ -414,6 +418,16 @@ const footerPadding = 2
 // width instead of wrapping. Once PRs are selected the
 // actions come first, after how many are selected.
 func (m Model) footerText() string {
+	if m.openArmed {
+		n := len(m.selectedPRs())
+
+		return fmt.Sprintf(
+			"%d selected · press O again to open all %d · any other key cancels",
+			n,
+			n,
+		)
+	}
+
 	if m.quitArmed {
 		return fmt.Sprintf(
 			"%d selected · press q again to quit · any other key cancels",

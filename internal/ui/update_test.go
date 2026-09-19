@@ -2,6 +2,8 @@ package ui
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -601,6 +603,8 @@ func TestUpdate_UnknownMsg(t *testing.T) {
 	t.Parallel()
 
 	m := loadedModel()
+	m.open = nil // funcs never compare equal, so the model can't be compared with one set
+
 	updated, cmd := m.Update(struct{}{})
 
 	assert.Equal(t, m, updated)
@@ -1531,4 +1535,222 @@ func TestMouseWheelIsIgnoredWhilePrompting(t *testing.T) {
 	require.True(t, ok)
 
 	assert.Zero(t, same.table.Cursor())
+}
+
+const testPRURL = "https://github.com/hugoh/a/pull/"
+
+// browserModel is a 50-PR model whose PRs have URLs and whose browser records
+// every URL it is asked to open (failing with openErr if set). The first
+// selected rows are selected.
+func browserModel(selected int, opened *[]string, openErr error) Model {
+	m := pagedModel()
+
+	for i := range m.prs {
+		m.prs[i].URL = fmt.Sprintf("%s%d", testPRURL, m.prs[i].Number)
+	}
+
+	m.open = func(url string) error {
+		*opened = append(*opened, url)
+
+		return openErr
+	}
+
+	for i := range selected {
+		m.selected[keyOf(m.prs[i])] = true
+	}
+
+	return m
+}
+
+// pressAll presses the keys in order, running each command they return and
+// feeding its message back, like the bubbletea runtime would.
+func pressAll(t *testing.T, m Model, keys ...string) Model {
+	t.Helper()
+
+	for _, pressed := range keys {
+		var cmd tea.Cmd
+
+		m, cmd = m.handleListKeyByString(pressed)
+		if cmd == nil {
+			continue
+		}
+
+		if msg := cmd(); msg != nil {
+			updated, _ := m.Update(msg)
+
+			var ok bool
+
+			m, ok = updated.(Model)
+			require.True(t, ok)
+		}
+	}
+
+	return m
+}
+
+func urls(numbers ...int) []string {
+	out := make([]string, len(numbers))
+	for i, number := range numbers {
+		out[i] = fmt.Sprintf("%s%d", testPRURL, number)
+	}
+
+	return out
+}
+
+func TestOpenInBrowser(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		cursor  int
+		noURL   bool
+		noRows  bool
+		want    []string
+		wantNil bool // the key returns no command at all
+	}{
+		"opens the PR under the cursor": {cursor: 0, want: urls(1)},
+		"follows the cursor":            {cursor: 2, want: urls(3)},
+		"a PR without a URL":            {noURL: true, wantNil: true},
+		"no rows":                       {noRows: true, wantNil: true},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var opened []string
+
+			m := browserModel(0, &opened, nil)
+			if tt.noRows {
+				m = m.withResults(results{}).refreshRows()
+			}
+
+			m.table.SetCursor(tt.cursor)
+
+			if tt.noURL {
+				m.prs[0].URL = ""
+			}
+
+			after, cmd := m.handleListKeyByString("o")
+			require.Equal(t, tt.wantNil, cmd == nil)
+
+			if cmd != nil {
+				require.Nil(t, cmd(), "success needs no message")
+			}
+
+			require.Equal(t, tt.want, opened)
+			require.Empty(t, after.selected, "opening doesn't select")
+			require.False(t, after.previewOpen)
+		})
+	}
+}
+
+func TestOpenSelected(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		selected   int
+		noURL      int // index of a selected PR to strip the URL from, or -1
+		keys       []string
+		want       []string
+		wantArmed  bool
+		wantNotice string
+		wantFooter string
+	}{
+		"up to the limit opens at once": {
+			selected: openAllConfirmAbove, noURL: -1, keys: []string{"O"},
+			want: urls(1, 2, 3, 4, 5),
+		},
+		"more asks first": {
+			selected: 8, noURL: -1, keys: []string{"O"},
+			wantArmed: true, wantFooter: "O again to open all 8",
+		},
+		"the second press opens them": {
+			selected: 8, noURL: -1, keys: []string{"O", "O"},
+			want: urls(1, 2, 3, 4, 5, 6, 7, 8),
+		},
+		"another key cancels the question": {
+			selected: 8, noURL: -1, keys: []string{"O", "j"},
+		},
+		"and it asks again afterwards": {
+			selected: 8, noURL: -1, keys: []string{"O", "j", "O"},
+			wantArmed: true,
+		},
+		"too many is refused": {
+			selected: openAllMax + 1, noURL: -1, keys: []string{"O", "O"},
+			wantNotice: "O can open at most 20",
+		},
+		"the maximum still asks": {
+			selected: openAllMax, noURL: -1, keys: []string{"O"},
+			wantArmed: true,
+		},
+		"nothing selected": {selected: 0, noURL: -1, keys: []string{"O"}},
+		"PRs without a URL are skipped": {
+			selected: 3, noURL: 1, keys: []string{"O"},
+			want: urls(1, 3),
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var opened []string
+
+			m := browserModel(tt.selected, &opened, nil)
+			if tt.noURL >= 0 {
+				m.prs[tt.noURL].URL = ""
+			}
+
+			after := pressAll(t, m, tt.keys...)
+
+			require.Equal(t, tt.want, opened)
+			require.Equal(t, tt.wantArmed, after.openArmed)
+
+			if tt.wantNotice != "" {
+				require.Contains(t, after.statusLine(), tt.wantNotice)
+			}
+
+			if tt.wantFooter != "" {
+				require.Contains(t, after.footerText(), tt.wantFooter)
+			}
+		})
+	}
+}
+
+func TestOpenFailure(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		selected  int
+		keys      []string
+		wantCalls int
+	}{
+		"one PR":                            {selected: 0, keys: []string{"o"}, wantCalls: 1},
+		"one failure doesn't stop the rest": {selected: 3, keys: []string{"O"}, wantCalls: 3},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var opened []string
+
+			m := browserModel(tt.selected, &opened, errors.New("no browser"))
+
+			failed := pressAll(t, m, tt.keys...)
+
+			require.Len(t, opened, tt.wantCalls)
+			require.Contains(t, failed.statusLine(), "couldn't open PR")
+			require.Contains(t, failed.statusLine(), "no browser")
+
+			cleared := pressAll(t, failed, "j")
+			require.NotContains(t, cleared.statusLine(), "couldn't open")
+		})
+	}
+}
+
+func TestNew_HasARealBrowserByDefault(t *testing.T) {
+	t.Parallel()
+
+	require.NotNil(t, New(nil, "q").open)
 }

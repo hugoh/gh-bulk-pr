@@ -35,6 +35,8 @@ Press `?` in the app for this list.
 | `1` / `2`                 | Switch tab: `involves:@me` / `owner:@me`       |
 | `/`                       | Edit the full search query                     |
 | `enter` / `p`             | Toggle preview                                 |
+| `o`                       | Open the PR under the cursor in the browser    |
+| `O`                       | Open all selected PRs (asks above 5, max 20)   |
 | `T`                       | Open the PR in `gh enhance` (checks)           |
 | `l`                       | Add label to selected PRs                      |
 | `c`                       | Close selected PRs                             |

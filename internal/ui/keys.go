@@ -8,7 +8,7 @@ import "github.com/charmbracelet/bubbles/key"
 type keyMap struct {
 	Move, Up, Down, Top, Bottom, PageUp, PageDown key.Binding
 	Select, SelectAll, Clear, Preview             key.Binding
-	Filter, Tab, Refresh, Checks                  key.Binding
+	Filter, Tab, Refresh, Checks, Open, OpenAll   key.Binding
 	Label, Close, Merge                           key.Binding
 	Help, Quit                                    key.Binding
 }
@@ -34,6 +34,8 @@ func newKeyMap() keyMap {
 		Tab:       binding("1/2", "tab", "1", "2"),
 		Refresh:   binding("r", "refresh", "r"),
 		Checks:    binding("T", "checks", "T"),
+		Open:      binding("o", "open", "o"),
+		OpenAll:   binding("O", "open all", "O"),
 		Label:     binding("l", "label", "l"),
 		Close:     binding("c", "close", "c"),
 		Merge:     binding("m", "merge", "m"),
@@ -44,12 +46,12 @@ func newKeyMap() keyMap {
 
 // short is the footer when nothing is selected.
 func (k keyMap) short() []key.Binding {
-	return []key.Binding{k.Move, k.Select, k.Preview, k.Filter, k.Tab, k.Refresh, k.Help, k.Quit}
+	return []key.Binding{k.Move, k.Select, k.Preview, k.Open, k.Filter, k.Refresh, k.Help, k.Quit}
 }
 
 // shortSelected is the footer once PRs are selected: the actions come first.
 func (k keyMap) shortSelected() []key.Binding {
-	return []key.Binding{k.Label, k.Close, k.Merge, k.Refresh, k.Clear, k.Help}
+	return []key.Binding{k.Label, k.Close, k.Merge, k.OpenAll, k.Clear, k.Help}
 }
 
 // full is the "?" screen, one column per group.
@@ -57,7 +59,7 @@ func (k keyMap) full() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.Top, k.Bottom, k.PageUp, k.PageDown},
 		{k.Select, k.SelectAll, k.Clear, k.Preview},
-		{k.Filter, k.Tab, k.Refresh, k.Checks},
+		{k.Filter, k.Tab, k.Refresh, k.Checks, k.Open, k.OpenAll},
 		{k.Label, k.Close, k.Merge, k.Help, k.Quit},
 	}
 }

@@ -89,7 +89,10 @@ type Model struct {
 
 	cancelMore context.CancelFunc // stops the further page being fetched, if any
 
-	quitArmed   bool // q was pressed with a selection; a second q quits
+	open        func(url string) error // opens a URL in the browser; replaced in tests
+	notice      string                 // a one-off message for the status line, cleared by the next key
+	openArmed   bool                   // O was pressed with a large selection; a second O opens them
+	quitArmed   bool                   // q was pressed with a selection; a second q quits
 	previewOpen bool
 	err         error
 	moreErr     error // last failure loading a further page; the list stays usable
@@ -159,6 +162,7 @@ func New(client *github.Client, query string) Model {
 	return Model{
 		client:      client,
 		keys:        newKeyMap(),
+		open:        browse,
 		help:        newHelp(),
 		query:       query,
 		tab:         tabFor(query),

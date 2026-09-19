@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"sync/atomic"
 
@@ -29,8 +30,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleResize(msg), nil
 	case searchDoneMsg:
 		return m.handleSearchDone(msg), nil
-	case historyLoadedMsg:
-		return m.handleHistoryLoaded(msg), nil
+	case modelMsg:
+		return msg.applyTo(m), nil
 	case actionDoneMsg:
 		m.results = msg.results
 		m.screen = screenResults
@@ -60,6 +61,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+// modelMsg is a message that only updates the model, with no command to run.
+type modelMsg interface {
+	applyTo(m Model) Model
+}
+
+func (msg historyLoadedMsg) applyTo(m Model) Model { return m.handleHistoryLoaded(msg) }
+
+func (msg openFailedMsg) applyTo(m Model) Model {
+	m.notice = "couldn't open PR: " + msg.err.Error()
+
+	return m
 }
 
 // handleHistoryLoaded gives the open filter bar its past queries; a message
@@ -406,8 +420,8 @@ func (m Model) runQuery(query string) (Model, tea.Cmd) {
 
 func (m Model) handleListKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	keys := m.keys
-	armed := m.quitArmed
-	m.quitArmed = false
+	armed, openArmed := m.quitArmed, m.openArmed
+	m.quitArmed, m.openArmed, m.notice = false, false, ""
 
 	switch {
 	case key.Matches(msg, keys.Quit):
@@ -431,8 +445,8 @@ func (m Model) handleListKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m.selectAll()
 	case key.Matches(msg, keys.Refresh):
 		return m.reload()
-	case key.Matches(msg, keys.Checks, keys.Tab, keys.Label, keys.Close, keys.Merge):
-		return m.handleCommandKey(msg)
+	case key.Matches(msg, keys.Checks, keys.Open, keys.OpenAll, keys.Tab, keys.Label, keys.Close, keys.Merge):
+		return m.handleCommandKey(msg, openArmed)
 	}
 
 	var cmd tea.Cmd
@@ -455,12 +469,51 @@ func (m Model) requestQuit(armed bool) (Model, tea.Cmd) {
 	return m, tea.Quit
 }
 
-func (m Model) handleCommandKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+const (
+	// openAllConfirmAbove is the most PRs O opens without asking first.
+	openAllConfirmAbove = 5
+	// openAllMax is the most it will open at all: a browser tab each is hard to undo.
+	openAllMax = 20
+)
+
+// openSelected opens every selected PR that has a URL in the browser. Up to
+// openAllConfirmAbove go straight away, more need a second O (armed), and
+// more than openAllMax are refused.
+func (m Model) openSelected(armed bool) (Model, tea.Cmd) {
+	var urls []string
+
+	for _, pr := range m.selectedPRs() {
+		if pr.URL != "" {
+			urls = append(urls, pr.URL)
+		}
+	}
+
+	switch {
+	case len(urls) == 0:
+		return m, nil
+	case len(urls) > openAllMax:
+		m.notice = fmt.Sprintf("%d selected: O can open at most %d at once", len(urls), openAllMax)
+
+		return m, nil
+	case len(urls) > openAllConfirmAbove && !armed:
+		m.openArmed = true
+
+		return m, nil
+	}
+
+	return m, m.openAll(urls)
+}
+
+func (m Model) handleCommandKey(msg tea.KeyMsg, openArmed bool) (Model, tea.Cmd) {
 	pressed := msg.String()
 
 	switch {
 	case key.Matches(msg, m.keys.Checks):
 		return m, m.launchEnhance()
+	case key.Matches(msg, m.keys.Open):
+		return m, m.openFocused()
+	case key.Matches(msg, m.keys.OpenAll):
+		return m.openSelected(openArmed)
 	case key.Matches(msg, m.keys.Tab):
 		return m.runQuery(tabs()[int(pressed[0]-'1')].query)
 	default:

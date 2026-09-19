@@ -3,10 +3,12 @@ package ui
 import (
 	"context"
 	"fmt"
+	"io"
 	"os/exec"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/cli/go-gh/v2/pkg/browser"
 	"github.com/hugoh/gh-bulk-pr/internal/github"
 	"github.com/hugoh/gh-bulk-pr/internal/worker"
 )
@@ -165,4 +167,52 @@ func (m Model) loadHistory() tea.Cmd {
 	log := m.history
 
 	return func() tea.Msg { return historyLoadedMsg{entries: log.Load()} }
+}
+
+// openFailedMsg reports that the browser couldn't be started.
+type openFailedMsg struct {
+	err error
+}
+
+// browse opens url the way gh does: $GH_BROWSER, gh's browser setting,
+// $BROWSER, then the system default. Its output is discarded so it can't
+// scribble over the TUI.
+func browse(url string) error {
+	if err := browser.New("", io.Discard, io.Discard).Browse(url); err != nil {
+		return fmt.Errorf("open browser: %w", err)
+	}
+
+	return nil
+}
+
+// openFocused opens the focused PR in the browser, off the UI thread.
+func (m Model) openFocused() tea.Cmd {
+	pr, ok := m.focusedPR()
+	if !ok || pr.URL == "" {
+		return nil
+	}
+
+	return m.openAll([]string{pr.URL})
+}
+
+// openAll opens each url in turn, off the UI thread. One failure doesn't stop
+// the rest; the first is reported.
+func (m Model) openAll(urls []string) tea.Cmd {
+	open := m.open
+
+	return func() tea.Msg {
+		var first error
+
+		for _, url := range urls {
+			if err := open(url); err != nil && first == nil {
+				first = err
+			}
+		}
+
+		if first != nil {
+			return openFailedMsg{err: first}
+		}
+
+		return nil
+	}
 }

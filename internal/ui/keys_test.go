@@ -20,7 +20,7 @@ func TestHelpScreen_OpensListsEveryKeyAndCloses(t *testing.T) {
 	for _, want := range []string{
 		"↑/k", "↓/j", "g/home", "G/end", "pgup/b", "pgdn/f", // navigation, handled by the table
 		"x/space", "ctrl+a", "esc", "enter/p", // selecting and previewing
-		"/", "1/2", "r", "T", // searching
+		"/", "1/2", "r", "T", "o", "open", "O", "open all", // searching
 		textLabel, actionClose, "merge", "select all", "checks", textHelp, "quit",
 	} {
 		assert.Contains(t, view, want)
@@ -39,7 +39,7 @@ func TestFooter_ShortHelp(t *testing.T) {
 
 	assert.LessOrEqual(t, lipgloss.Width(footer), 100)
 
-	for _, want := range []string{"move", "select", "preview", textFilter, "tab", "refresh", "? help", "q quit"} {
+	for _, want := range []string{"move", "select", "preview", "o open", textFilter, "refresh", "? help", "q quit"} {
 		assert.Contains(t, footer, want)
 	}
 }
@@ -68,7 +68,7 @@ func TestFooter_SelectionShowsTheActions(t *testing.T) {
 
 	assert.Contains(t, footer, "1 selected of 2")
 
-	for _, want := range []string{textLabel, actionClose, "merge", "refresh", "clear", "? help"} {
+	for _, want := range []string{textLabel, actionClose, "merge", "open all", "clear", "? help"} {
 		assert.Contains(t, footer, want)
 	}
 
