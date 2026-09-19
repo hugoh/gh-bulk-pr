@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/hugoh/gh-bulk-pr/internal/github"
 	"github.com/hugoh/gh-bulk-pr/internal/history"
@@ -72,6 +73,7 @@ type Model struct {
 	action    *pendingAction
 	confirm   []github.PR
 	results   []worker.Result
+	pane      viewport.Model // scrolls the confirm and results lists
 
 	spinner     spinner.Model
 	progress    progress.Model
@@ -154,6 +156,7 @@ func New(client *github.Client, query string) Model {
 		table:       tableModel,
 		filterInput: filterTI,
 		actionInput: actionTI,
+		pane:        viewport.New(0, 0),
 		selected:    map[prKey]bool{},
 		cache:       map[string]results{},
 		loading:     true,

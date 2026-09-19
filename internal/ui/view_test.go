@@ -668,3 +668,166 @@ func TestView_PromptsWorkInSmallTerminals(t *testing.T) {
 
 	assert.NotContains(t, m.View(), "terminal too small", "only the table needs the minimum size")
 }
+
+func lineCount(view string) int { return strings.Count(view, "\n") + 1 }
+
+// bigConfirmModel is a 100x30 terminal about to close 200 PRs.
+func bigConfirmModel() Model {
+	m := loadedModel()
+	m.screen = screenConfirm
+	m.action = &pendingAction{label: actionClose, destructive: true}
+	m.confirm = manyPRs(1, 200, true)
+
+	return m
+}
+
+func TestViewConfirm_LongListScrolls(t *testing.T) {
+	t.Parallel()
+
+	m := bigConfirmModel()
+	view := m.View()
+
+	assert.LessOrEqual(t, lineCount(view), 30)
+	assert.Contains(t, view, "About to close on 200 PR(s)", "the heading stays pinned")
+	assert.Contains(t, view, "y to confirm 200 PR(s)", "the prompt stays pinned")
+	assert.Contains(t, view, "scroll", "the prompt says the list scrolls")
+	assert.Contains(t, view, "hugoh/a #1  PR")
+	assert.NotContains(t, view, "#200")
+
+	m, _ = m.handleConfirmKey(keyMsgFromString("G"))
+	view = m.View()
+
+	assert.Contains(t, view, "#200")
+	assert.NotContains(t, view, "hugoh/a #1  PR")
+	assert.Contains(t, view, "About to close on 200 PR(s)")
+	assert.LessOrEqual(t, lineCount(view), 30)
+}
+
+func TestViewConfirm_ShortListHasNoScrollHint(t *testing.T) {
+	t.Parallel()
+
+	m := loadedModel()
+	m.screen = screenConfirm
+	m.action = &pendingAction{label: actionClose}
+	m.confirm = testPRs()
+
+	assert.NotContains(t, m.View(), "scroll")
+}
+
+func TestConfirmScrollKeys(t *testing.T) {
+	t.Parallel()
+
+	m := bigConfirmModel()
+
+	m, _ = m.handleConfirmKey(keyMsgFromString("j"))
+	assert.Equal(t, 1, m.pane.YOffset)
+
+	m, _ = m.handleConfirmKey(keyMsgFromString("G"))
+	assert.Positive(t, m.pane.YOffset)
+
+	m, _ = m.handleConfirmKey(keyMsgFromString("g"))
+	assert.Zero(t, m.pane.YOffset)
+
+	same, _ := m.handleConfirmKey(keyMsgFromString("j"))
+	assert.Equal(t, screenConfirm, same.screen, "scrolling doesn't confirm or cancel")
+}
+
+func TestEnteringConfirmStartsAtTheTop(t *testing.T) {
+	t.Parallel()
+
+	m := loadedModel()
+	m.pane.SetContent(strings.Repeat("x\n", 100))
+	m.pane.YOffset = 5
+
+	m, _ = m.handleListKeyByString("ctrl+a")
+	m, _ = m.handleListKeyByString("c")
+
+	assert.Equal(t, screenConfirm, m.screen)
+	assert.Zero(t, m.pane.YOffset)
+}
+
+func TestResize_SizesThePane(t *testing.T) {
+	t.Parallel()
+
+	m := loadedModel().handleResize(tea.WindowSizeMsg{Width: 120, Height: 40})
+
+	assert.Equal(t, 120, m.pane.Width)
+	assert.Equal(t, 40-paneChrome, m.pane.Height)
+}
+
+func bigResultsModel() Model {
+	prs := manyPRs(1, 200, true)
+	res := make([]worker.Result, len(prs))
+
+	for i, pr := range prs {
+		res[i] = worker.Result{PR: pr}
+	}
+
+	res[198].Err = errors.New("boom 198")
+	res[199].Err = errors.New("boom 199")
+
+	m := loadedModel()
+	m.screen = screenResults
+	m.action = &pendingAction{label: actionClose}
+	m.results = res
+
+	return m
+}
+
+func TestViewResults_FailuresFirstAndSummarised(t *testing.T) {
+	t.Parallel()
+
+	m := bigResultsModel()
+	view := m.View()
+
+	assert.LessOrEqual(t, lineCount(view), 30)
+	assert.Contains(t, view, "Results: 198 ok · 2 failed")
+	assert.Contains(t, view, "boom 198", "failures are visible without scrolling")
+	assert.Contains(t, view, "boom 199")
+	assert.Less(
+		t,
+		strings.Index(view, "boom 198"),
+		strings.Index(view, "#1  PR"),
+		"failures come before successes",
+	)
+	assert.Contains(t, view, "enter/esc to continue")
+	assert.Contains(t, view, "scroll")
+}
+
+func TestViewResults_AllOK(t *testing.T) {
+	t.Parallel()
+
+	m := loadedModel()
+	m.screen = screenResults
+	m.results = []worker.Result{{PR: github.PR{Number: 1}}}
+
+	assert.Contains(t, m.View(), "Results: 1 ok")
+	assert.NotContains(t, m.View(), "failed")
+}
+
+func TestResultsScrollKeys(t *testing.T) {
+	t.Parallel()
+
+	m := bigResultsModel()
+
+	m, _ = m.handleResultsKey(keyMsgFromString("j"))
+	assert.Equal(t, 1, m.pane.YOffset)
+	assert.Equal(t, screenResults, m.screen, "scrolling doesn't leave the results")
+
+	m, _ = m.handleResultsKey(keyMsgFromString("G"))
+	assert.Positive(t, m.pane.YOffset)
+}
+
+func TestActionDoneStartsResultsAtTheTop(t *testing.T) {
+	t.Parallel()
+
+	m := bigResultsModel()
+	m.results = nil
+	m.pane.YOffset = 7
+
+	updated, _ := m.Update(actionDoneMsg{results: bigResultsModel().results})
+
+	mm, ok := updated.(Model)
+	require.True(t, ok)
+	assert.Zero(t, mm.pane.YOffset)
+}

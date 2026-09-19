@@ -31,6 +31,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case actionDoneMsg:
 		m.results = msg.results
 		m.screen = screenResults
+		m.pane.GotoTop()
 
 		return m, nil
 
@@ -72,6 +73,8 @@ const (
 func (m Model) handleResize(msg tea.WindowSizeMsg) Model {
 	m.width, m.height = msg.Width, msg.Height
 	m.table.SetWidth(m.width)
+	m.pane.Width = m.width
+	m.pane.Height = max(m.height-paneChrome, 1)
 	m.table.SetColumns(columnsForWidth(m.width))
 	m = m.syncTableHeight()
 
@@ -258,7 +261,7 @@ func (m Model) handleResultsKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m.reload()
 	}
 
-	return m, nil
+	return m.scrollPane(msg, m.resultsBody()), nil
 }
 
 // reload starts a fresh search for the current query, cancelling any still
@@ -405,10 +408,8 @@ func (m Model) startAction(key string) (Model, tea.Cmd) {
 	}
 
 	m.action = actionsForKey(m.client, key, "")
-	m.confirm = m.selectedPRs()
-	m.screen = screenConfirm
 
-	return m, nil
+	return m.enterConfirm(), nil
 }
 
 func (m Model) handleFilterKey(msg tea.KeyMsg) (Model, tea.Cmd) {
@@ -468,10 +469,8 @@ func (m Model) handleActionInputKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		input := m.actionInput.Value()
 		m.actionInput.Blur()
 		m.action = actionsForKey(m.client, m.actionKey, input)
-		m.confirm = m.selectedPRs()
-		m.screen = screenConfirm
 
-		return m, nil
+		return m.enterConfirm(), nil
 	case keyEsc:
 		m.actionInput.Blur()
 		m.screen = screenList
@@ -484,6 +483,31 @@ func (m Model) handleActionInputKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	m.actionInput, cmd = m.actionInput.Update(msg)
 
 	return m, cmd
+}
+
+func (m Model) enterConfirm() Model {
+	m.confirm = m.selectedPRs()
+	m.screen = screenConfirm
+	m.pane.GotoTop()
+
+	return m
+}
+
+// scrollPane scrolls the confirm/results list for keys that aren't the
+// screen's own: j/k, arrows, page keys via the viewport, plus g/G for top and bottom.
+func (m Model) scrollPane(msg tea.KeyMsg, body string) Model {
+	m.pane.SetContent(body)
+
+	switch msg.String() {
+	case "g", "home":
+		m.pane.GotoTop()
+	case "G", "end":
+		m.pane.GotoBottom()
+	default:
+		m.pane, _ = m.pane.Update(msg)
+	}
+
+	return m
 }
 
 func (m Model) handleConfirmKey(msg tea.KeyMsg) (Model, tea.Cmd) {
@@ -501,7 +525,7 @@ func (m Model) handleConfirmKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m, nil
 	}
 
-	return m, nil
+	return m.scrollPane(msg, m.confirmBody()), nil
 }
 
 // prKey identifies a PR across repos; PR numbers alone collide.

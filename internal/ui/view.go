@@ -1,7 +1,9 @@
 package ui
 
 import (
+	"cmp"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -9,6 +11,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/hugoh/gh-bulk-pr/internal/github"
+	"github.com/hugoh/gh-bulk-pr/internal/worker"
 )
 
 const (
@@ -409,24 +412,121 @@ func previewText(item github.PR) string {
 	return previewBoxStyle().Render(buf.String())
 }
 
-func (m Model) viewConfirm() string {
-	var buf strings.Builder
-	fmt.Fprintf(&buf, "About to %s on %d PR(s):\n\n", m.action.label, len(m.confirm))
+// paneChrome is the lines around the confirm/results list: the pinned
+// heading, the pinned prompt, and one spare.
+const paneChrome = 3
 
-	for _, pr := range m.confirm {
-		fmt.Fprintf(&buf, "  %s %s  %s\n", pr.Repo, prNumber(pr.Number), pr.Title)
+// viewPane draws body in the scrolling pane, at its current scroll offset.
+// Until the terminal size is known it is drawn whole.
+func (m Model) viewPane(body string) string {
+	if m.height == 0 {
+		return body
 	}
 
+	pane := m.pane
+	pane.SetContent(body)
+
+	return pane.View()
+}
+
+// scrollHint is appended to a prompt when body is taller than the pane.
+func (m Model) scrollHint(body string) string {
+	if m.height > 0 && strings.Count(body, "\n")+1 > m.pane.Height {
+		return " · j/k/g/G scroll"
+	}
+
+	return ""
+}
+
+func (m Model) confirmBody() string {
+	lines := make([]string, len(m.confirm))
+	for i, pr := range m.confirm {
+		lines[i] = fmt.Sprintf("  %s %s  %s", pr.Repo, prNumber(pr.Number), pr.Title)
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+func (m Model) viewConfirm() string {
 	confirmKeys := "y/enter"
 	if m.action.destructive {
 		confirmKeys = "y"
 	}
 
-	buf.WriteString("\n" + helpStyle().Render(
-		fmt.Sprintf("%s to confirm %d PR(s) · n/esc to cancel", confirmKeys, len(m.confirm)),
-	))
+	body := m.confirmBody()
+	prompt := fmt.Sprintf("%s to confirm %d PR(s) · n/esc to cancel", confirmKeys, len(m.confirm))
 
-	return buf.String()
+	return fmt.Sprintf("About to %s on %d PR(s):", m.action.label, len(m.confirm)) +
+		"\n" + m.viewPane(body) + "\n" + helpStyle().Render(prompt+m.scrollHint(body))
+}
+
+// sortedFailuresFirst returns results with failed ones first, otherwise in
+// order, so a failure is never scrolled out of sight.
+func sortedFailuresFirst(all []worker.Result) []worker.Result {
+	sorted := slices.Clone(all)
+	slices.SortStableFunc(sorted, func(a, b worker.Result) int {
+		return cmp.Compare(boolRank(b.Err != nil), boolRank(a.Err != nil))
+	})
+
+	return sorted
+}
+
+func boolRank(flag bool) int {
+	if flag {
+		return 1
+	}
+
+	return 0
+}
+
+func (m Model) resultsBody() string {
+	sorted := sortedFailuresFirst(m.results)
+	lines := make([]string, len(sorted))
+
+	for idx, res := range sorted {
+		status := okStyle().Render("✓")
+		if res.Err != nil {
+			status = errStyle().Render("✗ " + res.Err.Error())
+		}
+
+		lines[idx] = fmt.Sprintf(
+			"  %s %s  %s  %s",
+			res.PR.Repo,
+			prNumber(res.PR.Number),
+			res.PR.Title,
+			status,
+		)
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+func (m Model) resultsSummary() string {
+	failed := 0
+
+	for _, res := range m.results {
+		if res.Err != nil {
+			failed++
+		}
+	}
+
+	summary := fmt.Sprintf("Results: %d ok", len(m.results)-failed)
+	if failed > 0 {
+		summary += fmt.Sprintf(" · %d failed", failed)
+	}
+
+	return summary
+}
+
+func (m Model) viewResults() string {
+	if m.results == nil {
+		return m.viewActionProgress()
+	}
+
+	body := m.resultsBody()
+
+	return m.resultsSummary() + "\n" + m.viewPane(body) + "\n" +
+		helpStyle().Render("enter/esc to continue"+m.scrollHint(body))
 }
 
 func (m Model) viewActionProgress() string {
@@ -448,33 +548,4 @@ func (m Model) viewActionProgress() string {
 		m.actionTotal,
 		m.progress.ViewAs(percent),
 	)
-}
-
-func (m Model) viewResults() string {
-	if m.results == nil {
-		return m.viewActionProgress()
-	}
-
-	var buf strings.Builder
-	buf.WriteString("Results:\n\n")
-
-	for _, res := range m.results {
-		status := okStyle().Render("✓")
-		if res.Err != nil {
-			status = errStyle().Render("✗ " + res.Err.Error())
-		}
-
-		fmt.Fprintf(
-			&buf,
-			"  %s %s  %s  %s\n",
-			res.PR.Repo,
-			prNumber(res.PR.Number),
-			res.PR.Title,
-			status,
-		)
-	}
-
-	buf.WriteString("\n" + helpStyle().Render("enter/esc to continue"))
-
-	return buf.String()
 }
