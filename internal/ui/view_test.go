@@ -2,6 +2,7 @@ package ui
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -525,4 +526,145 @@ func TestViewConfirm_PromptMatchesTheKeysThatWork(t *testing.T) {
 	view := m.View()
 	assert.Contains(t, view, "y to confirm 2 PR(s)")
 	assert.NotContains(t, view, "y/enter")
+}
+
+func TestFit(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		in    string
+		width int
+		want  string
+	}{
+		"truncates with an ellipsis": {in: "hello world", width: 5, want: "hell…"},
+		"leaves short text alone":    {in: "short", width: 10, want: "short"},
+		"zero width is a no-op":      {in: "anything at all", width: 0, want: "anything at all"},
+		"each line separately":       {in: "abcdefgh\nab", width: 4, want: "abc…\nab"},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tt.want, fit(tt.in, tt.width))
+		})
+	}
+
+	styled := errStyle().Render(strings.Repeat("x", 50))
+	assert.LessOrEqual(
+		t,
+		lipgloss.Width(fit(styled, 10)),
+		10,
+		"escape sequences don't count towards width",
+	)
+}
+
+func maxLineWidth(view string) int {
+	widest := 0
+
+	for line := range strings.SplitSeq(view, "\n") {
+		widest = max(widest, lipgloss.Width(line))
+	}
+
+	return widest
+}
+
+func TestView_NeverWiderThanTheTerminal(t *testing.T) {
+	t.Parallel()
+
+	long := strings.Repeat("q", 500)
+
+	tests := map[string]func() Model{
+		"long query": func() Model {
+			m := loadedModel()
+			m.query = long
+
+			return m
+		},
+		"busy status line": func() Model {
+			m := pagedModel()
+			m.selected[keyOf(m.prs[0])] = true
+			m.loading, m.loadingMore = true, true
+			m.moreErr = errors.New(long)
+
+			return m
+		},
+		"footer with a selection": func() Model {
+			m := loadedModel()
+			m.selected[keyOf(m.prs[0])] = true
+
+			return m
+		},
+		"footer without a selection": loadedModel,
+		"filter prompt": func() Model {
+			m := loadedModel()
+			m.screen = screenFilter
+			m.filterInput.SetValue(long)
+
+			return m
+		},
+		"confirm with a long title": func() Model {
+			m := loadedModel()
+			m.screen = screenConfirm
+			m.action = &pendingAction{label: "close"}
+			m.confirm = []github.PR{{Number: 1, Repo: testRepoA, Title: long}}
+
+			return m
+		},
+	}
+
+	for name, build := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.LessOrEqual(t, maxLineWidth(build().View()), 100)
+		})
+	}
+}
+
+func TestView_TerminalTooSmall(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		width, height int
+		want          bool
+	}{
+		"big enough":       {width: minWidth, height: minHeight, want: false},
+		"one column short": {width: minWidth - 1, height: 30, want: true},
+		"one row short":    {width: 100, height: minHeight - 1, want: true},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := loadedModel().handleResize(tea.WindowSizeMsg{Width: tt.width, Height: tt.height})
+
+			assert.Equal(t, tt.want, strings.Contains(m.View(), "terminal too small"))
+
+			if tt.want {
+				assert.Contains(
+					t,
+					m.View(),
+					fmt.Sprintf("need %d×%d, have %d×%d", minWidth, minHeight, tt.width, tt.height),
+				)
+				assert.LessOrEqual(t, maxLineWidth(m.View()), tt.width)
+			}
+		})
+	}
+}
+
+func TestView_UnknownSizeIsNotTooSmall(t *testing.T) {
+	t.Parallel()
+
+	assert.NotContains(t, New(nil, "q").View(), "terminal too small")
+}
+
+func TestView_PromptsWorkInSmallTerminals(t *testing.T) {
+	t.Parallel()
+
+	m := loadedModel().handleResize(tea.WindowSizeMsg{Width: 40, Height: 8})
+	m.screen = screenFilter
+
+	assert.NotContains(t, m.View(), "terminal too small", "only the table needs the minimum size")
 }

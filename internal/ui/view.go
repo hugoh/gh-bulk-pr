@@ -194,8 +194,48 @@ func colorChecks(rendered string) string {
 	return strings.Join(lines, "\n")
 }
 
-// View renders the current screen.
+// minWidth and minHeight are the smallest terminal the PR table lays out in.
+const (
+	minWidth  = fixedColsSum + tableOverhead + colTitleMin
+	minHeight = previewHeightMargin + minListHeight
+)
+
+// tooSmall reports whether the list can't be drawn in the current terminal.
+// The size is unknown (0) until the first WindowSizeMsg.
+func (m Model) tooSmall() bool {
+	return m.screen == screenList && m.width > 0 && m.height > 0 &&
+		(m.width < minWidth || m.height < minHeight)
+}
+
+// View renders the current screen, with every line cut to the terminal width
+// so nothing wraps and throws off the height accounting.
 func (m Model) View() string {
+	if m.tooSmall() {
+		return fit(fmt.Sprintf(
+			"terminal too small: need %d×%d, have %d×%d",
+			minWidth, minHeight, m.width, m.height,
+		), m.width)
+	}
+
+	return fit(m.render(), m.width)
+}
+
+// fit truncates each line of s to width cells with an ellipsis; width 0
+// (size not known yet) leaves s alone.
+func fit(s string, width int) string {
+	if width <= 0 {
+		return s
+	}
+
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		lines[i] = ansi.Truncate(line, width, "…")
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+func (m Model) render() string {
 	switch m.screen {
 	case screenList:
 		return m.viewList()
@@ -278,7 +318,7 @@ func (m Model) statusLine() string {
 		parts = append(parts, errStyle().Render("load more failed: "+m.moreErr.Error()))
 	}
 
-	status := strings.Join(parts, "  ")
+	status := fit(strings.Join(parts, "  "), m.width)
 	if m.width == 0 {
 		return status
 	}

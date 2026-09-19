@@ -83,7 +83,7 @@ func (m Model) handleResize(msg tea.WindowSizeMsg) Model {
 // lines and at most a quarter of the available height, leaving the rest for
 // the preview panel below it.
 func (m Model) syncTableHeight() Model {
-	available := m.height - previewHeightMargin
+	available := max(m.height-previewHeightMargin, 1)
 	if !m.previewOpen {
 		m.table.SetHeight(available)
 

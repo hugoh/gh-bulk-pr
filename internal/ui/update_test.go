@@ -1203,3 +1203,11 @@ func TestStartFilterPutsCursorAtEnd(t *testing.T) {
 
 	assert.Equal(t, len(m.query), m.filterInput.Position())
 }
+
+func TestSyncTableHeight_NeverNegative(t *testing.T) {
+	t.Parallel()
+
+	m := New(nil, "q").handleResize(tea.WindowSizeMsg{Width: 100, Height: 3})
+
+	assert.GreaterOrEqual(t, m.table.Height(), 0)
+}
