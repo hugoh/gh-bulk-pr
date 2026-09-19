@@ -15,7 +15,7 @@ func TestNeedsInput(t *testing.T) {
 		key  string
 		want bool
 	}{
-		"label":     {"l", true},
+		textLabel:   {"l", true},
 		actionClose: {"c", false},
 		actionMerge: {"m", false},
 	}
@@ -39,7 +39,7 @@ func TestActionsForKey(t *testing.T) {
 		input     string
 		wantLabel string
 	}{
-		"label":     {"l", "bug", `add label "bug"`},
+		textLabel:   {"l", "bug", `add label "bug"`},
 		actionClose: {"c", "", actionClose},
 		actionMerge: {"m", "", actionMerge},
 		"unknown":   {"z", "", ""},

@@ -73,8 +73,8 @@ func TestFooterText(t *testing.T) {
 	t.Parallel()
 
 	m := loadedModel()
-	assert.Contains(t, m.footerText(), "filter")
-	assert.Contains(t, m.footerText(), "T checks")
+	assert.Contains(t, m.footerText(), textFilter)
+	assert.Contains(t, m.footerText(), "? help", "keys that don't fit live behind ?")
 
 	m.selected[keyOf(m.prs[0])] = true
 	assert.Contains(t, m.footerText(), "1 selected")
@@ -138,7 +138,7 @@ func TestViewList_ShowsFooterAndTable(t *testing.T) {
 	m := loadedModel()
 	view := m.View()
 	assert.Contains(t, view, prTitleFix)
-	assert.Contains(t, view, "filter")
+	assert.Contains(t, view, textFilter)
 }
 
 func TestViewList_PreviewOpen(t *testing.T) {
@@ -537,7 +537,7 @@ func TestFit(t *testing.T) {
 		want  string
 	}{
 		"truncates with an ellipsis": {in: "hello world", width: 5, want: "hell…"},
-		"leaves short text alone":    {in: "short", width: 10, want: "short"},
+		"leaves short text alone":    {in: textShort, width: 10, want: textShort},
 		"zero width is a no-op":      {in: "anything at all", width: 0, want: "anything at all"},
 		"each line separately":       {in: "abcdefgh\nab", width: 4, want: "abc…\nab"},
 	}
@@ -606,7 +606,7 @@ func TestView_NeverWiderThanTheTerminal(t *testing.T) {
 		"confirm with a long title": func() Model {
 			m := loadedModel()
 			m.screen = screenConfirm
-			m.action = &pendingAction{label: "close"}
+			m.action = &pendingAction{label: actionClose}
 			m.confirm = []github.PR{{Number: 1, Repo: testRepoA, Title: long}}
 
 			return m

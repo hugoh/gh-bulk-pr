@@ -16,6 +16,10 @@ import (
 )
 
 const (
+	textLabel   = "label"
+	textFilter  = "filter"
+	textHelp    = "help"
+	textShort   = "short"
 	actionClose = "close"
 	actionMerge = "merge"
 	prTitleFix  = "Fix bug"
@@ -169,10 +173,11 @@ func TestCtrlCQuitsFromEveryScreen(t *testing.T) {
 
 	screens := map[string]screen{
 		"list":         screenList,
-		"filter":       screenFilter,
+		textFilter:     screenFilter,
 		"action input": screenActionInput,
 		"confirm":      screenConfirm,
 		"results":      screenResults,
+		textHelp:       screenHelp,
 	}
 
 	for name, current := range screens {
@@ -607,10 +612,11 @@ func TestHandleKey_AllScreens(t *testing.T) {
 
 	tests := map[string]screen{
 		"list":         screenList,
-		"filter":       screenFilter,
+		textFilter:     screenFilter,
 		"action input": screenActionInput,
 		"confirm":      screenConfirm,
 		"results":      screenResults,
+		textHelp:       screenHelp,
 	}
 
 	for name, s := range tests {

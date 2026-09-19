@@ -6,6 +6,7 @@ import (
 	"context"
 	"sync/atomic"
 
+	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -38,6 +39,7 @@ const (
 	screenActionInput
 	screenConfirm
 	screenResults
+	screenHelp
 )
 
 type pendingAction struct {
@@ -50,6 +52,8 @@ type pendingAction struct {
 // bar, and bulk-action flow.
 type Model struct {
 	client  *github.Client
+	keys    keyMap
+	help    help.Model
 	query   string
 	tab     int // index into tabs, or noTab when query matches none
 	history *history.Log
@@ -151,6 +155,8 @@ func New(client *github.Client, query string) Model {
 
 	return Model{
 		client:      client,
+		keys:        newKeyMap(),
+		help:        newHelp(),
 		query:       query,
 		tab:         tabFor(query),
 		table:       tableModel,
@@ -175,4 +181,11 @@ func (m Model) WithHistory(h *history.Log) Model {
 // Init kicks off the first PR search and starts the loading spinner.
 func (m Model) Init() tea.Cmd {
 	return m.searchCmds(context.Background())
+}
+
+func newHelp() help.Model {
+	h := help.New()
+	h.ShortSeparator = " · "
+
+	return h
 }

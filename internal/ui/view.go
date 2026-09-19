@@ -257,6 +257,8 @@ func (m Model) render() string {
 		return m.viewConfirm()
 	case screenResults:
 		return m.viewResults()
+	case screenHelp:
+		return m.viewHelp()
 	}
 
 	return ""
@@ -347,16 +349,31 @@ func (m Model) positionText() string {
 	return text
 }
 
+// footerPadding is the footer style's horizontal padding.
+const footerPadding = 2
+
+// footerText is the key hints for the current state, cut to the terminal
+// width instead of wrapping. Once PRs are selected the
+// actions come first, after how many are selected.
 func (m Model) footerText() string {
+	prefix, bindings := "", m.keys.short()
+
 	if n := len(m.selectedPRs()); n > 0 {
-		return fmt.Sprintf(
-			"%d selected of %d · [l]abel  [c]lose  [m]erge  [r]efresh  [Esc] clear",
-			n,
-			max(m.total, len(m.prs)),
-		)
+		prefix = fmt.Sprintf("%d selected of %d · ", n, max(m.total, len(m.prs)))
+		bindings = m.keys.shortSelected()
 	}
 
-	return "j/k move · x select · Enter/p preview · T checks · / filter · 1/2 tab · Ctrl+a all · r refresh · q quit"
+	// The help widget only truncates when it has room for its ellipsis, so
+	// fit has the last word.
+	return fit(prefix+m.help.ShortHelpView(bindings), m.width-footerPadding)
+}
+
+func (m Model) viewHelp() string {
+	columns := m.help
+	columns.Width = m.width
+
+	return headerStyle().Render("Keys") + "\n\n" + columns.FullHelpView(m.keys.full()) +
+		"\n\n" + helpStyle().Render("any key to close")
 }
 
 func previewChecks(item github.PR) string {

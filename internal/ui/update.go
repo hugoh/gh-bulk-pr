@@ -5,6 +5,7 @@ import (
 	"slices"
 	"sync/atomic"
 
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/table"
 	tea "github.com/charmbracelet/bubbletea"
@@ -241,6 +242,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m.handleConfirmKey(msg)
 	case screenResults:
 		return m.handleResultsKey(msg)
+	case screenHelp:
+		m.screen = screenList
+
+		return m, nil
 	}
 
 	return m, nil
@@ -303,25 +308,31 @@ func (m Model) runQuery(query string) (Model, tea.Cmd) {
 }
 
 func (m Model) handleListKey(msg tea.KeyMsg) (Model, tea.Cmd) {
-	switch msg.String() {
-	case "q":
+	keys := m.keys
+
+	switch {
+	case key.Matches(msg, keys.Quit):
 		return m, tea.Quit
-	case "/":
+	case key.Matches(msg, keys.Filter):
 		return m.startFilter()
-	case keyEsc:
+	case key.Matches(msg, keys.Help):
+		m.screen = screenHelp
+
+		return m, nil
+	case key.Matches(msg, keys.Clear):
 		return m.clearSelectionOrPreview()
-	case keyEnter, "p":
+	case key.Matches(msg, keys.Preview):
 		m.previewOpen = !m.previewOpen
 		m = m.syncTableHeight()
 
 		return m, nil
-	case "x", " ":
+	case key.Matches(msg, keys.Select):
 		return m.toggleFocusedSelection()
-	case "ctrl+a":
+	case key.Matches(msg, keys.SelectAll):
 		return m.selectAll()
-	case "r":
+	case key.Matches(msg, keys.Refresh):
 		return m.reload()
-	case "T", "l", "c", "m", "1", "2":
+	case key.Matches(msg, keys.Checks, keys.Tab, keys.Label, keys.Close, keys.Merge):
 		return m.handleCommandKey(msg)
 	}
 
@@ -334,13 +345,15 @@ func (m Model) handleListKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 }
 
 func (m Model) handleCommandKey(msg tea.KeyMsg) (Model, tea.Cmd) {
-	switch key := msg.String(); key {
-	case "T":
+	pressed := msg.String()
+
+	switch {
+	case key.Matches(msg, m.keys.Checks):
 		return m, m.launchEnhance()
-	case "1", "2":
-		return m.runQuery(tabs()[int(key[0]-'1')].query)
+	case key.Matches(msg, m.keys.Tab):
+		return m.runQuery(tabs()[int(pressed[0]-'1')].query)
 	default:
-		return m.startAction(key)
+		return m.startAction(pressed)
 	}
 }
 
@@ -371,10 +384,10 @@ func (m Model) clearSelectionOrPreview() (Model, tea.Cmd) {
 
 func (m Model) toggleFocusedSelection() (Model, tea.Cmd) {
 	if pr, ok := m.focusedPR(); ok {
-		if key := keyOf(pr); m.selected[key] {
-			delete(m.selected, key)
+		if id := keyOf(pr); m.selected[id] {
+			delete(m.selected, id)
 		} else {
-			m.selected[key] = true
+			m.selected[id] = true
 		}
 
 		m = m.refreshRows()
@@ -393,13 +406,13 @@ func (m Model) selectAll() (Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) startAction(key string) (Model, tea.Cmd) {
+func (m Model) startAction(actionKey string) (Model, tea.Cmd) {
 	if len(m.selected) == 0 {
 		return m, nil
 	}
 
-	if needsInput(key) {
-		m.actionKey = key
+	if needsInput(actionKey) {
+		m.actionKey = actionKey
 		m.screen = screenActionInput
 		m.actionInput.SetValue("")
 		m.actionInput.Focus()
@@ -407,7 +420,7 @@ func (m Model) startAction(key string) (Model, tea.Cmd) {
 		return m, nil
 	}
 
-	m.action = actionsForKey(m.client, key, "")
+	m.action = actionsForKey(m.client, actionKey, "")
 
 	return m.enterConfirm(), nil
 }
@@ -511,15 +524,15 @@ func (m Model) scrollPane(msg tea.KeyMsg, body string) Model {
 }
 
 func (m Model) handleConfirmKey(msg tea.KeyMsg) (Model, tea.Cmd) {
-	switch key := msg.String(); {
-	case key == "y" || (key == keyEnter && !m.action.destructive):
+	switch pressed := msg.String(); {
+	case pressed == "y" || (pressed == keyEnter && !m.action.destructive):
 		m.screen = screenResults
 		m.results = nil
 		m.actionDone = new(atomic.Int32)
 		m.actionTotal = len(m.confirm)
 
 		return m, tea.Batch(m.runAction(), pollActionProgress(), m.spinner.Tick)
-	case key == "n" || key == keyEsc:
+	case pressed == "n" || pressed == keyEsc:
 		m.screen = screenList
 
 		return m, nil
