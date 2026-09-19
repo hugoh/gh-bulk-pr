@@ -2,11 +2,14 @@ package ui
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/hugoh/gh-bulk-pr/internal/github"
+	"github.com/hugoh/gh-bulk-pr/internal/history"
 	"github.com/hugoh/gh-bulk-pr/internal/worker"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -606,4 +609,98 @@ func TestHandleListKey_ToggleSelection_SameNumberInDifferentRepos(t *testing.T) 
 	got := m.selectedPRs()
 	require.Len(t, got, 1)
 	assert.Equal(t, testRepoA, got[0].Repo)
+}
+
+func TestTabs(t *testing.T) {
+	t.Parallel()
+
+	t.Run("starting on a tab query selects it", func(t *testing.T) {
+		t.Parallel()
+
+		m := New(nil, tabs()[1].query)
+		assert.Equal(t, 1, m.tab)
+	})
+
+	t.Run("custom query selects no tab", func(t *testing.T) {
+		t.Parallel()
+
+		m := New(nil, "is:open is:pr author:hugoh")
+		assert.Equal(t, noTab, m.tab)
+	})
+
+	t.Run("1 and 2 switch tab and rerun the search", func(t *testing.T) {
+		t.Parallel()
+
+		m := loadedModel()
+
+		m, cmd := m.handleListKeyByString("2")
+		assert.Equal(t, 1, m.tab)
+		assert.Equal(t, "is:open is:pr archived:false owner:@me", m.query)
+		assert.True(t, m.loading)
+		require.NotNil(t, cmd)
+
+		m, _ = m.handleListKeyByString("1")
+		assert.Equal(t, 0, m.tab)
+		assert.Equal(t, "is:open is:pr archived:false involves:@me", m.query)
+	})
+
+	t.Run("/ edits the full current query", func(t *testing.T) {
+		t.Parallel()
+
+		m, _ := loadedModel().handleListKeyByString("2")
+		m, _ = m.handleListKeyByString("/")
+
+		assert.Equal(t, screenFilter, m.screen)
+		assert.Equal(t, m.query, m.filterInput.Value())
+	})
+
+	t.Run("filter that differs from every tab deselects", func(t *testing.T) {
+		t.Parallel()
+
+		m := loadedModel()
+		m.screen = screenFilter
+		m.filterInput.SetValue("is:open is:pr author:hugoh")
+
+		m, _ = m.handleFilterKey(tea.KeyMsg{Type: tea.KeyEnter})
+		assert.Equal(t, noTab, m.tab)
+	})
+
+	t.Run("filter that matches a tab selects it", func(t *testing.T) {
+		t.Parallel()
+
+		m := loadedModel()
+		m.screen = screenFilter
+		m.filterInput.SetValue("is:open  is:pr archived:false owner:@me")
+
+		m, _ = m.handleFilterKey(tea.KeyMsg{Type: tea.KeyEnter})
+		assert.Equal(t, 1, m.tab)
+	})
+
+	t.Run("view shows the tab names", func(t *testing.T) {
+		t.Parallel()
+
+		view := loadedModel().View()
+		assert.Contains(t, view, "involves:@me")
+		assert.Contains(t, view, "owner:@me")
+	})
+}
+
+func TestQueryChangesAreRecorded(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "history")
+	m := loadedModel().WithHistory(history.New(path))
+
+	m, _ = m.handleListKeyByString("2")
+	m.screen = screenFilter
+	m.filterInput.SetValue("is:open is:pr author:hugoh")
+	_, _ = m.handleFilterKey(tea.KeyMsg{Type: tea.KeyEnter})
+
+	got, err := os.ReadFile(path) //nolint:gosec // test reads its own temp file
+	require.NoError(t, err)
+	assert.Equal(
+		t,
+		"is:open is:pr archived:false owner:@me\nis:open is:pr author:hugoh\n",
+		string(got),
+	)
 }

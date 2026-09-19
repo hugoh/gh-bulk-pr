@@ -141,6 +141,16 @@ func (m Model) reload() (Model, tea.Cmd) {
 	return m, tea.Batch(m.search(m.query), m.spinner.Tick)
 }
 
+// runQuery makes query current, selecting the tab it matches (if any),
+// records it in the history and reloads the list.
+func (m Model) runQuery(query string) (Model, tea.Cmd) {
+	m.query = query
+	m.tab = tabFor(query)
+	_ = m.history.Add(query) // best effort: history must never block a search
+
+	return m.reload()
+}
+
 func (m Model) handleListKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c", "q":
@@ -160,10 +170,8 @@ func (m Model) handleListKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m.selectAll()
 	case "r":
 		return m.reload()
-	case "T":
-		return m, m.launchEnhance()
-	case "l", "c", "m":
-		return m.startAction(msg.String())
+	case "T", "l", "c", "m", "1", "2":
+		return m.handleCommandKey(msg)
 	}
 
 	var cmd tea.Cmd
@@ -173,8 +181,20 @@ func (m Model) handleListKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m Model) handleCommandKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+	switch key := msg.String(); key {
+	case "T":
+		return m, m.launchEnhance()
+	case "1", "2":
+		return m.runQuery(tabs()[int(key[0]-'1')].query)
+	default:
+		return m.startAction(key)
+	}
+}
+
 func (m Model) startFilter() (Model, tea.Cmd) {
 	m.screen = screenFilter
+	m.filterInput.SetValue(m.query)
 	m.filterInput.Focus()
 
 	return m, nil
@@ -242,11 +262,10 @@ func (m Model) startAction(key string) (Model, tea.Cmd) {
 func (m Model) handleFilterKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	switch msg.String() {
 	case keyEnter:
-		m.query = m.filterInput.Value()
 		m.filterInput.Blur()
 		m.screen = screenList
 
-		return m.reload()
+		return m.runQuery(m.filterInput.Value())
 	case keyEsc:
 		m.filterInput.Blur()
 		m.screen = screenList

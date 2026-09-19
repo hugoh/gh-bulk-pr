@@ -217,7 +217,8 @@ func (m Model) View() string {
 }
 
 func (m Model) viewList() string {
-	header := headerStyle().Render("gh-bulk-pr") + "  " + helpStyle().Render(m.query)
+	header := headerStyle().Render("gh-bulk-pr") +
+		"  " + m.tabBar() + "  " + helpStyle().Render(m.query)
 
 	if m.loading {
 		return header + "\n\n" + m.spinner.View() + " loading…"
@@ -252,7 +253,7 @@ func (m Model) footerText() string {
 		return fmt.Sprintf("%d selected · [l]abel  [c]lose  [m]erge  [r]efresh  [Esc] clear", n)
 	}
 
-	return "j/k move · x select · Enter/p preview · T checks · / filter · Ctrl+a all · r refresh · q quit"
+	return "j/k move · x select · Enter/p preview · T checks · / filter · 1/2 tab · Ctrl+a all · r refresh · q quit"
 }
 
 func previewChecks(item github.PR) string {

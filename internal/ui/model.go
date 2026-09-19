@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/hugoh/gh-bulk-pr/internal/github"
+	"github.com/hugoh/gh-bulk-pr/internal/history"
 	"github.com/hugoh/gh-bulk-pr/internal/worker"
 )
 
@@ -36,8 +37,10 @@ type pendingAction struct {
 // Model is the bubbletea model driving the PR list, preview panel, filter
 // bar, and bulk-action flow.
 type Model struct {
-	client *github.Client
-	query  string
+	client  *github.Client
+	query   string
+	tab     int // index into tabs, or noTab when query matches none
+	history *history.Log
 
 	table       table.Model
 	filterInput textinput.Model
@@ -123,6 +126,7 @@ func New(client *github.Client, query string) Model {
 	return Model{
 		client:      client,
 		query:       query,
+		tab:         tabFor(query),
 		table:       tableModel,
 		filterInput: filterTI,
 		actionInput: actionTI,
@@ -131,6 +135,13 @@ func New(client *github.Client, query string) Model {
 		spinner:     spin,
 		progress:    prog,
 	}
+}
+
+// WithHistory records every query run from the filter bar or a tab into h.
+func (m Model) WithHistory(h *history.Log) Model {
+	m.history = h
+
+	return m
 }
 
 // Init kicks off the first PR search and starts the loading spinner.
