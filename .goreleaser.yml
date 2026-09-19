@@ -1,0 +1,65 @@
+# DO NOT EDIT — managed by hugoh/go-tools via copier.
+version: 2
+
+builds:
+  - env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+      - freebsd
+    goarch:
+      - amd64
+      - arm64
+      - "386"
+      - arm
+    ignore:
+      - goos: darwin
+        goarch: "386"
+      - goos: darwin
+        goarch: arm
+      - goos: freebsd
+        goarch: arm
+      - goos: freebsd
+        goarch: "386"
+    flags:
+      - -trimpath
+      - -mod=readonly
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+archives:
+  - format: binary
+    name_template: "gh-bulk-pr-{{ .Os }}-{{ .Arch }}"
+changelog:
+  use: git
+  sort: asc
+  groups:
+    - title: "⚠️ Breaking Changes"
+      regexp: '^.*?(\w+)(\(.+\))??!:.+$'
+      order: 0
+    - title: Features
+      regexp: '^.*?feat(\([[:word:]]+\))??!?:.+$'
+      order: 1
+    - title: Bug Fixes
+      regexp: '^.*?fix(\([[:word:]]+\))??!?:.+$'
+      order: 2
+    - title: Documentation
+      regexp: '^.*?docs?(\([[:word:]]+\))??!?:.+$'
+      order: 3
+    - title: Dependency Updates
+      regexp: '^.*?(feat|fix|chore)\(deps\).*:.+$'
+      order: 900
+    - title: Others
+      order: 999
+  filters:
+    exclude:
+      - "^chore\\(release\\): prepare for"
+      - "^chore\\(deps"
+      - "Merge pull request"
+      - "Merge branch"
+
+checksum:
+
+snapshot:

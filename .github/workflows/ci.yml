@@ -1,0 +1,41 @@
+# DO NOT EDIT — managed by hugoh/go-tools via copier.
+---
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      bump_type:
+        type: choice
+        description: "Version bump type"
+        default: auto
+        options: [auto, patch, minor, major]
+
+permissions: {}
+
+jobs:
+  hk:
+    uses: hugoh/go-tools/.github/workflows/go-hk.yml@4a5bc5d3439f082d298e53828fc5eaf8a07df8e6 # v1.25.0
+    permissions:
+      contents: read
+
+  goci:
+    uses: hugoh/go-tools/.github/workflows/go-ci.yml@4a5bc5d3439f082d298e53828fc5eaf8a07df8e6 # v1.25.0
+    permissions:
+      contents: read
+
+  release:
+    needs: [hk, goci]
+    uses: hugoh/go-tools/.github/workflows/go-release.yml@4a5bc5d3439f082d298e53828fc5eaf8a07df8e6 # v1.25.0
+    permissions:
+      contents: write
+    with:
+      bump_type: ${{ inputs.bump_type || 'auto' }}
+      has_goreleaser: true
+    secrets:
+      gh_token: ${{ secrets.GITHUB_TOKEN }}
+      tap_github_token: ${{ secrets.TAP_GITHUB_TOKEN }}

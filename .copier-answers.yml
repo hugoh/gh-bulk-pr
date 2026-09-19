@@ -1,0 +1,27 @@
+# Changes here will be overwritten by Copier; NEVER EDIT MANUALLY
+_commit: v1.25.0
+_src_path: https://github.com/hugoh/go-tools.git
+coverage_total: 90
+golangci_extra_disable: []
+golangci_extra_exclusions: []
+golangci_settings: ''
+golangci_test_exclude_linters:
+- funlen
+goreleaser_before_hooks: []
+goreleaser_version_pkg: main
+has_executable: true
+has_fuzz: false
+has_gen: false
+has_goreleaser: true
+has_homebrew_cask: false
+has_pages: false
+has_test_int: false
+nfpm_extra_contents: []
+package_format: binary
+project_description: Bulk-edit GitHub pull requests (label, reviewer, close, merge)
+    from the terminal
+project_name: gh-bulk-pr
+testcoverage_excludes:
+- ^main\.go$
+testcoverage_overrides: []
+

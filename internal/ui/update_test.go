@@ -1,0 +1,609 @@
+package ui
+
+import (
+	"context"
+	"testing"
+
+	"github.com/charmbracelet/bubbles/spinner"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/hugoh/gh-bulk-pr/internal/github"
+	"github.com/hugoh/gh-bulk-pr/internal/worker"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+const (
+	actionClose = "close"
+	actionMerge = "merge"
+	prTitleFix  = "Fix bug"
+	testAuthor  = "hugoh"
+	testRepoA   = "hugoh/a"
+	testRepoB   = "hugoh/b"
+)
+
+func testPRs() []github.PR {
+	return []github.PR{
+		{
+			Number:     1,
+			Title:      prTitleFix,
+			Repo:       testRepoA,
+			Author:     testAuthor,
+			MergeState: mergeBehind,
+		},
+		{Number: 2, Title: "Add feature", Repo: testRepoB, Author: testAuthor},
+	}
+}
+
+// loadedModel returns a Model with two PRs loaded (as handleSearchDone would
+// leave it) and sized like a real terminal, so the table has rows and a
+// cursor to test against.
+func loadedModel() Model {
+	m := New(nil, "is:open is:pr")
+	m = m.handleResize(tea.WindowSizeMsg{Width: 100, Height: 30})
+	m = m.handleSearchDone(searchDoneMsg{prs: testPRs()})
+
+	return m
+}
+
+// keyMsgFromString builds a tea.KeyMsg whose String() matches s, for the
+// handful of key forms this app switches on ("esc", "enter", "ctrl+a",
+// "ctrl+c", or a single printable rune like "x" or "/").
+func keyMsgFromString(s string) tea.KeyMsg {
+	switch s {
+	case "esc":
+		return tea.KeyMsg{Type: tea.KeyEsc}
+	case "enter":
+		return tea.KeyMsg{Type: tea.KeyEnter}
+	case "ctrl+a":
+		return tea.KeyMsg{Type: tea.KeyCtrlA}
+	case "ctrl+c":
+		return tea.KeyMsg{Type: tea.KeyCtrlC}
+	case " ":
+		return tea.KeyMsg{Type: tea.KeySpace}
+	default:
+		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
+	}
+}
+
+func (m Model) handleListKeyByString(s string) (Model, tea.Cmd) {
+	return m.handleListKey(keyMsgFromString(s))
+}
+
+func noopAction(context.Context, github.PR) error { return nil }
+
+func TestHandleResize(t *testing.T) {
+	t.Parallel()
+
+	m := New(nil, "q")
+	m = m.handleResize(tea.WindowSizeMsg{Width: 80, Height: 24})
+
+	assert.Equal(t, 80, m.width)
+	assert.Equal(t, 24, m.height)
+	assert.Equal(t, 24-previewHeightMargin-1, m.table.Height())
+}
+
+func TestSyncTableHeight(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		height      int
+		previewOpen bool
+		want        int
+	}{
+		"no preview uses full height": {
+			height:      30,
+			previewOpen: false,
+			want:        30 - previewHeightMargin - 1,
+		},
+		"preview open uses a quarter": {
+			height:      40,
+			previewOpen: true,
+			want:        (40-previewHeightMargin)/previewListFraction - 1,
+		},
+		"preview open clamps to the minimum": {
+			height:      10,
+			previewOpen: true,
+			want:        minListHeight - 1,
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := New(nil, "q")
+			m.height = tt.height
+			m.previewOpen = tt.previewOpen
+			m = m.syncTableHeight()
+
+			assert.Equal(t, tt.want, m.table.Height())
+		})
+	}
+}
+
+func TestHandleSearchDone(t *testing.T) {
+	t.Parallel()
+
+	t.Run("success", func(t *testing.T) {
+		t.Parallel()
+
+		m := New(nil, "q")
+		m = m.handleSearchDone(searchDoneMsg{prs: testPRs()})
+
+		assert.False(t, m.loading)
+		require.NoError(t, m.err)
+		assert.Equal(t, testPRs(), m.prs)
+		assert.Len(t, m.table.Rows(), 2)
+	})
+
+	t.Run("error", func(t *testing.T) {
+		t.Parallel()
+
+		m := New(nil, "q")
+		m = m.handleSearchDone(searchDoneMsg{err: assert.AnError})
+
+		assert.False(t, m.loading)
+		require.ErrorIs(t, m.err, assert.AnError)
+		assert.Empty(t, m.prs)
+	})
+}
+
+func TestHandleListKey_Quit(t *testing.T) {
+	t.Parallel()
+
+	for _, key := range []string{"ctrl+c", "q"} {
+		m := loadedModel()
+
+		_, cmd := m.handleListKeyByString(key)
+		require.NotNil(t, cmd)
+
+		msg := cmd()
+		_, ok := msg.(tea.QuitMsg)
+		assert.True(t, ok, "key %q should quit", key)
+	}
+}
+
+func TestHandleListKey_Filter(t *testing.T) {
+	t.Parallel()
+
+	m := loadedModel()
+	m, _ = m.handleListKeyByString("/")
+
+	assert.Equal(t, screenFilter, m.screen)
+	assert.True(t, m.filterInput.Focused())
+}
+
+func TestHandleListKey_ToggleSelection(t *testing.T) {
+	t.Parallel()
+
+	m := loadedModel()
+	assert.Empty(t, m.selected)
+
+	m, _ = m.handleListKeyByString("x")
+	assert.NotEmpty(t, m.selected)
+	assert.True(t, m.selected[keyOf(m.prs[0])], "toggling should select the focused (first) row")
+
+	m, _ = m.handleListKeyByString("x")
+	assert.Empty(t, m.selected, "toggling again should deselect")
+}
+
+func TestHandleListKey_SelectAll(t *testing.T) {
+	t.Parallel()
+
+	m := loadedModel()
+	m, _ = m.handleListKeyByString("ctrl+a")
+
+	assert.Len(t, m.selectedPRs(), 2)
+}
+
+func TestHandleListKey_EscClearsSelectionThenPreview(t *testing.T) {
+	t.Parallel()
+
+	m := loadedModel()
+	m, _ = m.handleListKeyByString("x")
+	require.NotEmpty(t, m.selected)
+
+	m, _ = m.handleListKeyByString("esc")
+	assert.Empty(t, m.selected, "esc clears selection first")
+
+	m, _ = m.handleListKeyByString("p")
+	require.True(t, m.previewOpen)
+
+	m, _ = m.handleListKeyByString("esc")
+	assert.False(t, m.previewOpen, "esc then closes an open preview")
+}
+
+func TestHandleListKey_TogglePreviewResizesTable(t *testing.T) {
+	t.Parallel()
+
+	m := loadedModel()
+	fullHeight := m.table.Height()
+
+	m, _ = m.handleListKeyByString("enter")
+	assert.True(t, m.previewOpen)
+	assert.Less(t, m.table.Height(), fullHeight)
+
+	m, _ = m.handleListKeyByString("enter")
+	assert.False(t, m.previewOpen)
+	assert.Equal(t, fullHeight, m.table.Height())
+}
+
+func TestHandleListKey_RefreshReloadsPRs(t *testing.T) {
+	t.Parallel()
+
+	m := loadedModel()
+
+	m, cmd := m.handleListKeyByString("r")
+
+	assert.True(t, m.loading)
+	assert.Equal(t, screenList, m.screen)
+	assert.NotNil(t, cmd)
+}
+
+func TestHandleListKey_StartAction_NoSelection(t *testing.T) {
+	t.Parallel()
+
+	m := loadedModel()
+	m, cmd := m.handleListKeyByString("c")
+
+	assert.Equal(t, screenList, m.screen, "action keys are no-ops with nothing selected")
+	assert.Nil(t, cmd)
+}
+
+func TestHandleListKey_StartAction_NeedsInput(t *testing.T) {
+	t.Parallel()
+
+	m := loadedModel()
+	m, _ = m.handleListKeyByString("x")
+
+	m, _ = m.handleListKeyByString("l")
+	assert.Equal(t, screenActionInput, m.screen)
+	assert.Equal(t, "l", m.actionKey)
+	assert.True(t, m.actionInput.Focused())
+}
+
+func TestHandleListKey_StartAction_NoInputNeeded(t *testing.T) {
+	t.Parallel()
+
+	m := loadedModel()
+	m, _ = m.handleListKeyByString("x")
+
+	m, _ = m.handleListKeyByString("c")
+	assert.Equal(t, screenConfirm, m.screen)
+	require.Len(t, m.confirm, 1)
+	assert.Equal(t, 1, m.confirm[0].Number)
+}
+
+func TestHandleFilterKey(t *testing.T) {
+	t.Parallel()
+
+	t.Run("enter runs the new query", func(t *testing.T) {
+		t.Parallel()
+
+		m := loadedModel()
+		m.screen = screenFilter
+		m.filterInput.SetValue("is:open author:hugoh")
+
+		m, cmd := m.handleFilterKey(tea.KeyMsg{Type: tea.KeyEnter})
+
+		assert.Equal(t, screenList, m.screen)
+		assert.Equal(t, "is:open author:hugoh", m.query)
+		assert.True(t, m.loading)
+		require.NotNil(t, cmd)
+	})
+
+	t.Run("esc cancels without changing the query", func(t *testing.T) {
+		t.Parallel()
+
+		m := loadedModel()
+		original := m.query
+		m.screen = screenFilter
+		m.filterInput.SetValue("something else")
+
+		m, _ = m.handleFilterKey(tea.KeyMsg{Type: tea.KeyEsc})
+
+		assert.Equal(t, screenList, m.screen)
+		assert.Equal(t, original, m.query)
+	})
+}
+
+func TestHandleActionInputKey(t *testing.T) {
+	t.Parallel()
+
+	t.Run("enter builds the action and moves to confirm", func(t *testing.T) {
+		t.Parallel()
+
+		m := loadedModel()
+		m, _ = m.handleListKeyByString("x")
+		m.screen = screenActionInput
+		m.actionKey = "l"
+		m.actionInput.SetValue("bug")
+
+		m, _ = m.handleActionInputKey(tea.KeyMsg{Type: tea.KeyEnter})
+
+		assert.Equal(t, screenConfirm, m.screen)
+		require.NotNil(t, m.action)
+		assert.Contains(t, m.action.label, "bug")
+		require.Len(t, m.confirm, 1)
+	})
+
+	t.Run("esc cancels back to the list", func(t *testing.T) {
+		t.Parallel()
+
+		m := loadedModel()
+		m.screen = screenActionInput
+		m.actionKey = "l"
+
+		m, _ = m.handleActionInputKey(tea.KeyMsg{Type: tea.KeyEsc})
+
+		assert.Equal(t, screenList, m.screen)
+	})
+}
+
+func TestHandleConfirmKey(t *testing.T) {
+	t.Parallel()
+
+	t.Run("y starts the action", func(t *testing.T) {
+		t.Parallel()
+
+		m := loadedModel()
+		m.screen = screenConfirm
+		m.confirm = testPRs()
+		m.action = &pendingAction{label: actionClose, run: noopAction}
+
+		m, cmd := m.handleConfirmKey(tea.KeyMsg{Type: tea.KeyEnter})
+
+		assert.Equal(t, screenResults, m.screen)
+		assert.Nil(t, m.results)
+		require.NotNil(t, m.actionDone)
+		assert.Equal(t, 2, m.actionTotal)
+		require.NotNil(t, cmd)
+	})
+
+	t.Run("n cancels back to the list", func(t *testing.T) {
+		t.Parallel()
+
+		m := loadedModel()
+		m.screen = screenConfirm
+
+		m, _ = m.handleConfirmKey(keyMsgFromString("n"))
+		assert.Equal(t, screenList, m.screen)
+	})
+}
+
+func TestHandleResultsKey(t *testing.T) {
+	t.Parallel()
+
+	m := loadedModel()
+	m.screen = screenResults
+	m.results = nil
+
+	m, cmd := m.handleResultsKey(tea.KeyMsg{Type: tea.KeyEnter})
+
+	assert.Equal(t, screenList, m.screen)
+	assert.True(t, m.loading)
+	require.NotNil(t, cmd)
+}
+
+func TestFocusedPR(t *testing.T) {
+	t.Parallel()
+
+	m := loadedModel()
+	pr, ok := m.focusedPR()
+	require.True(t, ok)
+	assert.Equal(t, 1, pr.Number)
+
+	empty := New(nil, "q")
+	_, ok = empty.focusedPR()
+	assert.False(t, ok)
+}
+
+func TestSelectedPRs(t *testing.T) {
+	t.Parallel()
+
+	m := loadedModel()
+	assert.Empty(t, m.selectedPRs())
+
+	m.selected[keyOf(m.prs[1])] = true
+	got := m.selectedPRs()
+	require.Len(t, got, 1)
+	assert.Equal(t, 2, got[0].Number)
+}
+
+func TestRowsFor(t *testing.T) {
+	t.Parallel()
+
+	prs := testPRs()
+	rows := rowsFor(prs, map[prKey]bool{keyOf(prs[1]): true})
+
+	require.Len(t, rows, 2)
+	assert.Equal(t, " ", rows[0][0])
+	assert.Equal(t, "x", rows[1][0])
+	assert.Equal(t, "#1", rows[0][2])
+	assert.Equal(t, "behind", rows[0][5])
+	assert.Equal(t, testAuthor, rows[0][6])
+}
+
+func TestUpdate_WindowSize(t *testing.T) {
+	t.Parallel()
+
+	m := New(nil, "q")
+	updated, cmd := m.Update(tea.WindowSizeMsg{Width: 90, Height: 20})
+
+	mm, ok := updated.(Model)
+	require.True(t, ok)
+	assert.Equal(t, 90, mm.width)
+	assert.Nil(t, cmd)
+}
+
+func TestUpdate_SearchDone(t *testing.T) {
+	t.Parallel()
+
+	m := New(nil, "q")
+	updated, _ := m.Update(searchDoneMsg{prs: testPRs()})
+
+	mm, ok := updated.(Model)
+	require.True(t, ok)
+	assert.False(t, mm.loading)
+	assert.Equal(t, testPRs(), mm.prs)
+}
+
+func TestUpdate_ActionDone(t *testing.T) {
+	t.Parallel()
+
+	m := loadedModel()
+	updated, cmd := m.Update(actionDoneMsg{})
+
+	mm, ok := updated.(Model)
+	require.True(t, ok)
+	assert.Equal(t, screenResults, mm.screen)
+	assert.Nil(t, cmd)
+}
+
+func TestUpdate_ActionProgress(t *testing.T) {
+	t.Parallel()
+
+	t.Run("reschedules while running", func(t *testing.T) {
+		t.Parallel()
+
+		m := loadedModel()
+		m.screen = screenResults
+		m.results = nil
+
+		_, cmd := m.Update(actionProgressMsg{})
+		require.NotNil(t, cmd)
+	})
+
+	t.Run("stops once results land", func(t *testing.T) {
+		t.Parallel()
+
+		m := loadedModel()
+		m.screen = screenResults
+		m.results = []worker.Result{}
+
+		_, cmd := m.Update(actionProgressMsg{})
+		assert.Nil(t, cmd)
+	})
+}
+
+func TestUpdate_SpinnerTick(t *testing.T) {
+	t.Parallel()
+
+	tick := spinner.TickMsg{}
+
+	t.Run("active while loading", func(t *testing.T) {
+		t.Parallel()
+
+		m := New(nil, "q") // loading: true
+		_, cmd := m.Update(tick)
+		assert.NotNil(t, cmd)
+	})
+
+	t.Run("inactive once loaded and idle", func(t *testing.T) {
+		t.Parallel()
+
+		m := loadedModel()
+		_, cmd := m.Update(tick)
+		assert.Nil(t, cmd)
+	})
+}
+
+func TestUpdate_KeyMsgDispatch(t *testing.T) {
+	t.Parallel()
+
+	m := loadedModel()
+	updated, _ := m.Update(keyMsgFromString("/"))
+
+	mm, ok := updated.(Model)
+	require.True(t, ok)
+	assert.Equal(t, screenFilter, mm.screen)
+}
+
+func TestUpdate_UnknownMsg(t *testing.T) {
+	t.Parallel()
+
+	m := loadedModel()
+	updated, cmd := m.Update(struct{}{})
+
+	assert.Equal(t, m, updated)
+	assert.Nil(t, cmd)
+}
+
+func TestHandleKey_AllScreens(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]screen{
+		"list":         screenList,
+		"filter":       screenFilter,
+		"action input": screenActionInput,
+		"confirm":      screenConfirm,
+		"results":      screenResults,
+	}
+
+	for name, s := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := loadedModel()
+			m.screen = s
+			m.action = &pendingAction{label: actionClose, run: noopAction}
+			m.results = []worker.Result{}
+
+			// esc is handled distinctly (or ignored) by every screen without panicking.
+			assert.NotPanics(t, func() { m.handleKey(keyMsgFromString("esc")) })
+		})
+	}
+}
+
+func TestHandleListKey_DefaultPassesToTable(t *testing.T) {
+	t.Parallel()
+
+	m := loadedModel()
+	before := m.table.Cursor()
+
+	m, _ = m.handleListKeyByString("j")
+	assert.Greater(t, m.table.Cursor(), before, "j should move the table cursor down")
+}
+
+func TestEnhanceCommand(t *testing.T) {
+	t.Parallel()
+
+	cmd := enhanceCommand(github.PR{URL: "https://github.com/hugoh/a/pull/1"})
+
+	assert.Equal(t, []string{"gh", "enhance", "https://github.com/hugoh/a/pull/1"}, cmd.Args)
+}
+
+func TestHandleListKey_EnhanceLaunchesForFocusedPR(t *testing.T) {
+	t.Parallel()
+
+	m := loadedModel()
+	_, cmd := m.handleListKeyByString("T")
+
+	assert.NotNil(t, cmd)
+}
+
+func TestHandleListKey_EnhanceNoopWithoutPRs(t *testing.T) {
+	t.Parallel()
+
+	m := New(nil, "q")
+	_, cmd := m.handleListKeyByString("T")
+
+	assert.Nil(t, cmd)
+}
+
+func TestHandleListKey_ToggleSelection_SameNumberInDifferentRepos(t *testing.T) {
+	t.Parallel()
+
+	m := New(nil, "is:open is:pr")
+	m = m.handleResize(tea.WindowSizeMsg{Width: 100, Height: 30})
+	m = m.handleSearchDone(searchDoneMsg{prs: []github.PR{
+		{Number: 7, Title: "First", Repo: testRepoA, Author: testAuthor},
+		{Number: 7, Title: "Second", Repo: testRepoB, Author: testAuthor},
+	}})
+
+	m, _ = m.handleListKeyByString("x")
+
+	got := m.selectedPRs()
+	require.Len(t, got, 1)
+	assert.Equal(t, testRepoA, got[0].Repo)
+}

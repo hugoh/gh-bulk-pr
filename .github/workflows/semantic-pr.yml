@@ -1,0 +1,15 @@
+# DO NOT EDIT — managed by hugoh/go-tools via copier.
+---
+name: semantic-pr
+
+on: # yamllint disable-line rule:truthy
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions: {}
+
+jobs:
+  semantic-pr:
+    uses: hugoh/go-tools/.github/workflows/semantic-pr.yml@4a5bc5d3439f082d298e53828fc5eaf8a07df8e6 # v1.25.0
+    permissions:
+      pull-requests: read
