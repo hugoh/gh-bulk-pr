@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 )
 
 const (
@@ -17,8 +18,11 @@ const (
 )
 
 // Log appends queries to a file, one per line. A nil *Log discards everything.
+// It is safe for concurrent use.
 type Log struct {
 	path string
+
+	mu   sync.Mutex
 	last string
 }
 
@@ -41,7 +45,14 @@ func DefaultPath() string {
 // Add appends query unless it repeats the previous entry.
 // ponytail: unbounded append-only file, truncate on load if it ever gets big.
 func (l *Log) Add(query string) error {
-	if l == nil || query == l.last {
+	if l == nil {
+		return nil
+	}
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	if query == l.last {
 		return nil
 	}
 

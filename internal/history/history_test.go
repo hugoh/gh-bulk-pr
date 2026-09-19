@@ -1,8 +1,10 @@
 package history
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -68,4 +70,20 @@ func TestLog_Load(t *testing.T) {
 	var nilLog *Log
 
 	assert.Empty(t, nilLog.Load())
+}
+
+func TestLog_ConcurrentAdd(t *testing.T) {
+	t.Parallel()
+
+	log := New(filepath.Join(t.TempDir(), "history"))
+
+	var group sync.WaitGroup
+
+	for i := range 50 {
+		group.Go(func() { assert.NoError(t, log.Add(fmt.Sprintf("query %d", i))) })
+	}
+
+	group.Wait()
+
+	assert.Len(t, log.Load(), 50)
 }

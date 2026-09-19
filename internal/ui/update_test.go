@@ -767,10 +767,21 @@ func TestQueryChangesAreRecorded(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "history")
 	m := loadedModel().WithHistory(history.New(path))
 
-	m, _ = m.handleListKeyByString("2")
-	m.screen = screenFilter
-	m.filterInput.SetValue("is:open is:pr author:hugoh")
-	_, _ = m.handleFilterKey(tea.KeyMsg{Type: tea.KeyEnter})
+	record := func(query string) {
+		var cmd tea.Cmd
+
+		m, cmd = m.runQuery(query)
+
+		batch, ok := cmd().(tea.BatchMsg)
+		require.True(t, ok)
+		require.NotEmpty(t, batch)
+
+		// The history write is the first command of the batch.
+		assert.Nil(t, batch[0](), "recording a query produces no message")
+	}
+
+	record(tabs()[1].query)
+	record("is:open is:pr author:hugoh")
 
 	got, err := os.ReadFile(path) //nolint:gosec // test reads its own temp file
 	require.NoError(t, err)
@@ -779,6 +790,26 @@ func TestQueryChangesAreRecorded(t *testing.T) {
 		"is:open is:pr archived:false sort:updated-desc owner:@me\nis:open is:pr author:hugoh\n",
 		string(got),
 	)
+}
+
+func TestRunQuery_DoesNoFileIOItself(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "history")
+	m := loadedModel().WithHistory(history.New(path))
+
+	_, cmd := m.runQuery("is:open")
+
+	require.NotNil(t, cmd)
+	assert.NoFileExists(t, path, "the write happens when the command runs, not inside Update")
+}
+
+func TestRunQuery_WithoutHistory(t *testing.T) {
+	t.Parallel()
+
+	_, cmd := loadedModel().runQuery("is:open")
+
+	assert.NotNil(t, cmd, "the search still runs")
 }
 
 func reloaded(t *testing.T, m Model) (Model, tea.Cmd) {
@@ -1154,6 +1185,24 @@ func TestTabSwitchRestoresPaging(t *testing.T) {
 	assert.True(t, m.hasMore)
 }
 
+// openFilter presses / and delivers the history the command loads.
+func openFilter(t *testing.T, m Model) Model {
+	t.Helper()
+
+	m, cmd := m.handleListKeyByString("/")
+	require.NotNil(t, cmd, "opening the filter loads the history in a command")
+
+	msg := cmd()
+	require.IsType(t, historyLoadedMsg{}, msg)
+
+	updated, _ := m.Update(msg)
+
+	opened, ok := updated.(Model)
+	require.True(t, ok)
+
+	return opened
+}
+
 func TestFilterHistoryRecall(t *testing.T) {
 	t.Parallel()
 
@@ -1162,8 +1211,7 @@ func TestFilterHistoryRecall(t *testing.T) {
 		require.NoError(t, log.Add(query))
 	}
 
-	m := loadedModel().WithHistory(log)
-	m, _ = m.handleListKeyByString("/")
+	m := openFilter(t, loadedModel().WithHistory(log))
 	m.filterInput.SetValue("draft")
 
 	press := func(m Model, keyType tea.KeyType) Model {
@@ -1189,10 +1237,37 @@ func TestFilterHistoryRecall(t *testing.T) {
 	assert.Equal(t, "draft", m.filterInput.Value())
 }
 
+func TestOpeningFilterDoesNoFileIO(t *testing.T) {
+	t.Parallel()
+
+	log := history.New(filepath.Join(t.TempDir(), "history"))
+	require.NoError(t, log.Add("first"))
+
+	m, _ := loadedModel().WithHistory(log).handleListKeyByString("/")
+
+	assert.Empty(
+		t,
+		m.filterHistory,
+		"history arrives with the command's message, not inside Update",
+	)
+}
+
+func TestHistoryLoadedIsIgnoredOutsideTheFilter(t *testing.T) {
+	t.Parallel()
+
+	updated, _ := loadedModel().Update(historyLoadedMsg{entries: []string{"a"}})
+
+	mm, ok := updated.(Model)
+	require.True(t, ok)
+	assert.Empty(t, mm.filterHistory)
+}
+
 func TestFilterHistoryRecall_NoHistory(t *testing.T) {
 	t.Parallel()
 
-	m, _ := loadedModel().handleListKeyByString("/")
+	m, cmd := loadedModel().handleListKeyByString("/")
+	assert.Nil(t, cmd, "nothing to load without a history log")
+
 	m, _ = m.handleFilterKey(tea.KeyMsg{Type: tea.KeyUp})
 
 	assert.Equal(t, m.query, m.filterInput.Value())

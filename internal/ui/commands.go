@@ -28,6 +28,11 @@ type searchDoneMsg struct {
 	err     error
 }
 
+// historyLoadedMsg delivers the past queries read for the filter bar.
+type historyLoadedMsg struct {
+	entries []string
+}
+
 type actionDoneMsg struct {
 	results []worker.Result
 }
@@ -132,4 +137,32 @@ func actionsForKey(client *github.Client, actionKey, input string) *pendingActio
 // (a label name) before it can run.
 func needsInput(k string) bool {
 	return k == "l"
+}
+
+// recordQuery appends query to the history file. It's a command so the file
+// write stays out of Update; a failure is dropped, since history must never
+// get in the way of a search.
+func (m Model) recordQuery(query string) tea.Cmd {
+	if m.history == nil {
+		return nil
+	}
+
+	log := m.history
+
+	return func() tea.Msg {
+		_ = log.Add(query)
+
+		return nil
+	}
+}
+
+// loadHistory reads the past queries for the filter bar.
+func (m Model) loadHistory() tea.Cmd {
+	if m.history == nil {
+		return nil
+	}
+
+	log := m.history
+
+	return func() tea.Msg { return historyLoadedMsg{entries: log.Load()} }
 }

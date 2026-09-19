@@ -29,6 +29,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleResize(msg), nil
 	case searchDoneMsg:
 		return m.handleSearchDone(msg), nil
+	case historyLoadedMsg:
+		return m.handleHistoryLoaded(msg), nil
 	case actionDoneMsg:
 		m.results = msg.results
 		m.screen = screenResults
@@ -59,6 +61,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+// handleHistoryLoaded gives the open filter bar its past queries; a message
+// that arrives after the bar was closed has nothing to do.
+func (m Model) handleHistoryLoaded(msg historyLoadedMsg) Model {
+	if m.screen == screenFilter {
+		m.filterHistory = msg.entries
+		m.filterPos = len(msg.entries)
+	}
+
+	return m
 }
 
 func (m Model) spinnerActive() bool {
@@ -322,13 +335,13 @@ func (m Model) withResults(res results) Model {
 func (m Model) runQuery(query string) (Model, tea.Cmd) {
 	m.query = query
 	m.tab = tabFor(query)
-	_ = m.history.Add(query) // best effort: history must never block a search
 
 	m = m.withResults(m.cache[query])
 	m.selected = map[prKey]bool{}
 	m = m.refreshRows()
+	m, search := m.reload()
 
-	return m.reload()
+	return m, tea.Batch(m.recordQuery(query), search)
 }
 
 func (m Model) handleListKey(msg tea.KeyMsg) (Model, tea.Cmd) {
@@ -386,10 +399,10 @@ func (m Model) startFilter() (Model, tea.Cmd) {
 	m.filterInput.SetValue(m.query)
 	m.filterInput.CursorEnd()
 	m.filterInput.Focus()
-	m.filterHistory = m.history.Load()
-	m.filterPos = len(m.filterHistory)
+	m.filterHistory = nil
+	m.filterPos = 0
 
-	return m, nil
+	return m, m.loadHistory()
 }
 
 func (m Model) clearSelectionOrPreview() (Model, tea.Cmd) {
