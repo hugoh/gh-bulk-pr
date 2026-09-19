@@ -13,14 +13,19 @@ import (
 
 const progressPollInterval = 150 * time.Millisecond
 
-// searchDoneMsg carries one search result. id and query say which search it
-// answers; light marks the fast first pass that lacks checks and merge state.
+// searchDoneMsg carries one page of search results. id and query say which
+// search it answers; light marks the fast pass that lacks checks and merge
+// state, and more marks a page after the first.
 type searchDoneMsg struct {
-	id    int
-	query string
-	light bool
-	prs   []github.PR
-	err   error
+	id      int
+	query   string
+	light   bool
+	more    bool
+	prs     []github.PR
+	total   int
+	cursor  string
+	hasNext bool
+	err     error
 }
 
 type actionDoneMsg struct {
@@ -29,29 +34,48 @@ type actionDoneMsg struct {
 
 type actionProgressMsg struct{}
 
-// searchCmds runs the full search and, when there are no rows to show yet,
-// a light one alongside it so the list paints sooner. Both stop with ctx.
+// searchCmds runs the full search for the first page and, when there are no
+// rows to show yet, a light one alongside it so the list paints sooner. Both
+// stop with ctx.
 func (m Model) searchCmds(ctx context.Context) tea.Cmd {
-	cmds := []tea.Cmd{m.spinner.Tick, m.runSearch(ctx, false)}
+	cmds := []tea.Cmd{m.spinner.Tick, m.runSearch(ctx, false, "", false)}
 	if len(m.prs) == 0 {
-		cmds = append(cmds, m.runSearch(ctx, true))
+		cmds = append(cmds, m.runSearch(ctx, true, "", false))
 	}
 
 	return tea.Batch(cmds...)
 }
 
-func (m Model) runSearch(ctx context.Context, light bool) tea.Cmd {
+// moreCmds fetches the page after m.endCursor, light and full at once: its
+// rows aren't on screen yet. ponytail: not cancelled by a reload, only
+// ignored via searchID; store a context if the wasted requests matter.
+func (m Model) moreCmds() tea.Cmd {
+	ctx := context.Background()
+
+	return tea.Batch(
+		m.spinner.Tick,
+		m.runSearch(ctx, false, m.endCursor, true),
+		m.runSearch(ctx, true, m.endCursor, true),
+	)
+}
+
+func (m Model) runSearch(ctx context.Context, light bool, after string, more bool) tea.Cmd {
 	client, query, searchID := m.client, m.query, m.searchID
 
 	return func() tea.Msg {
-		fetch := client.SearchPRs
-		if light {
-			fetch = client.SearchPRsLight
+		page, err := client.SearchPage(ctx, query, after, light)
+
+		return searchDoneMsg{
+			id:      searchID,
+			query:   query,
+			light:   light,
+			more:    more,
+			prs:     page.PRs,
+			total:   page.Total,
+			cursor:  page.EndCursor,
+			hasNext: page.HasNext,
+			err:     err,
 		}
-
-		prs, err := fetch(ctx, query, maxBatchSize)
-
-		return searchDoneMsg{id: searchID, query: query, light: light, prs: prs, err: err}
 	}
 }
 

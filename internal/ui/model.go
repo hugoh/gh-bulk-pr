@@ -17,7 +17,17 @@ import (
 	"github.com/hugoh/gh-bulk-pr/internal/worker"
 )
 
-const maxBatchSize = 50
+// loadMoreMargin is how close to the last loaded row the cursor gets before
+// the next page is fetched.
+const loadMoreMargin = 10
+
+// results is a fully loaded search: the rows plus what's needed to fetch more.
+type results struct {
+	prs     []github.PR
+	total   int
+	cursor  string
+	hasMore bool
+}
 
 type screen int
 
@@ -50,8 +60,10 @@ type Model struct {
 	filterInput textinput.Model
 	actionInput textinput.Model
 	prs         []github.PR
-	cache       map[string][]github.PR // last full result per query
-	detailed    bool                   // prs carry checks/merge state, not just the light fields
+	cache       map[string]results // last full result per query
+	total       int                // every match GitHub reports, loaded or not
+	endCursor   string             // where the next page starts
+	hasMore     bool
 	selected    map[prKey]bool
 
 	screen    screen
@@ -70,7 +82,9 @@ type Model struct {
 
 	previewOpen bool
 	err         error
-	loading     bool
+	moreErr     error // last failure loading a further page; the list stays usable
+	loading     bool  // first page of a search in flight
+	loadingMore bool  // a further page in flight
 
 	width, height int
 }
@@ -140,7 +154,7 @@ func New(client *github.Client, query string) Model {
 		filterInput: filterTI,
 		actionInput: actionTI,
 		selected:    map[prKey]bool{},
-		cache:       map[string][]github.PR{},
+		cache:       map[string]results{},
 		loading:     true,
 		spinner:     spin,
 		progress:    prog,

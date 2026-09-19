@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"slices"
 	"sync/atomic"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -36,8 +37,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleActionProgress()
 
 	case spinner.TickMsg:
-		spinnerActive := m.loading || (m.screen == screenResults && m.results == nil)
-		if !spinnerActive {
+		if !m.spinnerActive() {
 			return m, nil
 		}
 
@@ -52,6 +52,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+func (m Model) spinnerActive() bool {
+	return m.loading || m.loadingMore || (m.screen == screenResults && m.results == nil)
 }
 
 const (
@@ -102,8 +106,11 @@ func (m Model) handleSearchDone(msg searchDoneMsg) Model {
 		return m
 	}
 
-	if msg.light {
+	switch {
+	case msg.light:
 		return m.handleLightDone(msg)
+	case msg.more:
+		return m.handleMoreDone(msg)
 	}
 
 	m.loading = false
@@ -111,25 +118,95 @@ func (m Model) handleSearchDone(msg searchDoneMsg) Model {
 
 	if msg.err == nil {
 		m.prs = msg.prs
-		m.detailed = true
-		m.cache[msg.query] = msg.prs
 		m.selected = survivingSelection(m.selected, m.prs)
+		m = m.storePaging(msg)
 		m = m.refreshRows()
 	}
 
 	return m
 }
 
-// handleLightDone paints the first-pass rows unless the full result already
-// arrived; its errors are left for the full search to report.
+// handleLightDone merges the first-pass rows into the list; it never
+// replaces detailed rows, and its errors are left for the full search to report.
 func (m Model) handleLightDone(msg searchDoneMsg) Model {
-	if m.detailed || msg.err != nil {
+	if msg.err != nil {
 		return m
 	}
 
-	m.prs = msg.prs
+	m.total = msg.total
+	m.prs = mergePRs(m.prs, msg.prs)
 
 	return m.refreshRows()
+}
+
+func (m Model) handleMoreDone(msg searchDoneMsg) Model {
+	m.loadingMore = false
+
+	if msg.err != nil {
+		m.moreErr = msg.err
+
+		return m
+	}
+
+	m.moreErr = nil
+	m.prs = mergePRs(m.prs, msg.prs)
+	m = m.storePaging(msg)
+
+	return m.refreshRows()
+}
+
+// storePaging records where the next page starts and caches everything
+// loaded so far for the current query.
+func (m Model) storePaging(msg searchDoneMsg) Model {
+	m.total, m.endCursor, m.hasMore = msg.total, msg.cursor, msg.hasNext
+	m.cache[msg.query] = results{
+		prs:     m.prs,
+		total:   m.total,
+		cursor:  m.endCursor,
+		hasMore: m.hasMore,
+	}
+
+	return m
+}
+
+// mergePRs adds incoming to prs by identity: new PRs are appended, known ones
+// updated in place, except that a light row never replaces a detailed one.
+// prs is not modified; it may be shared with the cache.
+func mergePRs(prs, incoming []github.PR) []github.PR {
+	merged := slices.Clone(prs)
+	index := make(map[prKey]int, len(merged))
+
+	for pos, existing := range merged {
+		index[keyOf(existing)] = pos
+	}
+
+	for _, fresh := range incoming {
+		pos, known := index[keyOf(fresh)]
+
+		switch {
+		case !known:
+			index[keyOf(fresh)] = len(merged)
+			merged = append(merged, fresh)
+		case fresh.Detailed || !merged[pos].Detailed:
+			merged[pos] = fresh
+		}
+	}
+
+	return merged
+}
+
+// maybeLoadMore fetches the next page once the cursor is within
+// loadMoreMargin rows of the last loaded one. A failed page is retried by the
+// next cursor move.
+func (m Model) maybeLoadMore() (Model, tea.Cmd) {
+	if !m.hasMore || m.loading || m.loadingMore || m.table.Cursor() < len(m.prs)-loadMoreMargin {
+		return m, nil
+	}
+
+	m.loadingMore = true
+	m.moreErr = nil
+
+	return m, m.moreCmds()
 }
 
 func survivingSelection(selected map[prKey]bool, prs []github.PR) map[prKey]bool {
@@ -164,7 +241,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 func (m Model) handleResultsKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	if msg.String() == keyEnter || msg.String() == keyEsc {
 		m.screen = screenList
-		m.prs = nil
+		m = m.withResults(results{})
 		m.selected = map[prKey]bool{}
 		delete(m.cache, m.query)
 		m = m.refreshRows()
@@ -182,17 +259,21 @@ func (m Model) reload() (Model, tea.Cmd) {
 		m.cancel()
 	}
 
-	if len(m.prs) == 0 {
-		m.detailed = false
-	}
-
 	ctx, cancel := context.WithCancel(context.Background())
 	m.cancel = cancel
 	m.searchID++
 	m.loading = true
+	m.loadingMore = false
+	m.moreErr = nil
 	m.err = nil
 
 	return m, m.searchCmds(ctx)
+}
+
+func (m Model) withResults(res results) Model {
+	m.prs, m.total, m.endCursor, m.hasMore = res.prs, res.total, res.cursor, res.hasMore
+
+	return m
 }
 
 // runQuery makes query current, selecting the tab it matches (if any),
@@ -202,8 +283,7 @@ func (m Model) runQuery(query string) (Model, tea.Cmd) {
 	m.tab = tabFor(query)
 	_ = m.history.Add(query) // best effort: history must never block a search
 
-	m.prs = m.cache[query]
-	m.detailed = len(m.prs) > 0
+	m = m.withResults(m.cache[query])
 	m.selected = map[prKey]bool{}
 	m = m.refreshRows()
 
@@ -236,8 +316,9 @@ func (m Model) handleListKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	var cmd tea.Cmd
 
 	m.table, cmd = m.table.Update(msg)
+	m, more := m.maybeLoadMore()
 
-	return m, cmd
+	return m, tea.Batch(cmd, more)
 }
 
 func (m Model) handleCommandKey(msg tea.KeyMsg) (Model, tea.Cmd) {
@@ -444,14 +525,14 @@ func (m Model) selectedPRs() []github.PR {
 }
 
 func (m Model) refreshRows() Model {
-	m.table.SetRows(rowsFor(m.prs, m.selected, m.detailed))
+	m.table.SetRows(rowsFor(m.prs, m.selected))
 
 	return m
 }
 
-// rowsFor builds the table rows; until detailed, the checks and merge cells
-// are placeholders because the light search doesn't fetch them.
-func rowsFor(prs []github.PR, selected map[prKey]bool, detailed bool) []table.Row {
+// rowsFor builds the table rows; for PRs that aren't detailed yet, the checks
+// and merge cells are placeholders because the light search doesn't fetch them.
+func rowsFor(prs []github.PR, selected map[prKey]bool) []table.Row {
 	rows := make([]table.Row, len(prs))
 	for idx, entry := range prs {
 		mark := " "
@@ -460,7 +541,7 @@ func rowsFor(prs []github.PR, selected map[prKey]bool, detailed bool) []table.Ro
 		}
 
 		checks, merge := pendingCell, pendingCell
-		if detailed {
+		if entry.Detailed {
 			checks, merge = checksSummary(entry), mergeLabel(entry.MergeState)
 		}
 

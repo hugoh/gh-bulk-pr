@@ -164,7 +164,7 @@ func TestView_ActionInputScreen(t *testing.T) {
 
 	m := loadedModel()
 	m.screen = screenActionInput
-	assert.Contains(t, m.View(), "Label:")
+	assert.Contains(t, m.View(), "Label for")
 }
 
 func TestViewConfirm(t *testing.T) {
@@ -316,15 +316,30 @@ func TestColorMerge_ColorsOnlyTheMergeColumn(t *testing.T) {
 
 	m := New(nil, "q").handleResize(tea.WindowSizeMsg{Width: 100, Height: 30})
 	m = m.handleSearchDone(searchDoneMsg{prs: []github.PR{
-		{Number: 1, Title: "fix", Repo: testRepoA, Author: testAuthor, MergeState: mergeBehind},
+		{
+			Number:     1,
+			Title:      "fix",
+			Repo:       testRepoA,
+			Author:     testAuthor,
+			MergeState: mergeBehind,
+			Detailed:   true,
+		},
 		{
 			Number:     2,
 			Title:      "clean up behind",
 			Repo:       testRepoB,
 			Author:     testAuthor,
 			MergeState: mergeClean,
+			Detailed:   true,
 		},
-		{Number: 3, Title: "other", Repo: "hugoh/c", Author: testAuthor, MergeState: mergeDirty},
+		{
+			Number:     3,
+			Title:      "other",
+			Repo:       "hugoh/c",
+			Author:     testAuthor,
+			MergeState: mergeDirty,
+			Detailed:   true,
+		},
 	}})
 
 	plain := m.table.View()
@@ -367,4 +382,131 @@ func TestViewList_RefreshingKeepsRows(t *testing.T) {
 
 	assert.Contains(t, view, prTitleFix, "rows stay visible during a refresh")
 	assert.Contains(t, view, "refreshing")
+}
+
+func TestViewList_ShowsLoadedOfTotal(t *testing.T) {
+	t.Parallel()
+
+	assert.Contains(t, pagedModel().View(), "1 of 312 · 50 loaded")
+	assert.NotContains(
+		t,
+		loadedModel().View(),
+		"loaded",
+		"a complete list has nothing left to load",
+	)
+}
+
+func TestFooter_SelectedOfTotal(t *testing.T) {
+	t.Parallel()
+
+	m := pagedModel()
+	m.selected[keyOf(m.prs[0])] = true
+
+	assert.Contains(t, m.footerText(), "1 selected of 312")
+}
+
+func TestViewList_LoadingMore(t *testing.T) {
+	t.Parallel()
+
+	m := pagedModel()
+	m.loadingMore = true
+
+	assert.Contains(t, m.View(), "loading more")
+}
+
+func TestViewList_StatusOnSecondLine(t *testing.T) {
+	t.Parallel()
+
+	m := pagedModel()
+	m.prs[0].MergeState = mergeBehind
+	m.loadingMore = true
+
+	lines := strings.Split(m.View(), "\n")
+
+	assert.Contains(t, lines[0], "gh-bulk-pr")
+	assert.NotContains(t, lines[0], "312")
+	assert.NotContains(t, lines[0], "behind")
+
+	for _, want := range []string{"1 behind", "1 of 312 · 50 loaded", "loading more"} {
+		assert.Contains(t, lines[1], want)
+	}
+}
+
+func TestViewList_EmptyResultKeepsSpacerLine(t *testing.T) {
+	t.Parallel()
+
+	m := New(nil, "q").handleResize(tea.WindowSizeMsg{Width: 100, Height: 30})
+	m = m.handleSearchDone(searchDoneMsg{prs: nil})
+
+	lines := strings.Split(m.View(), "\n")
+
+	assert.Empty(t, strings.TrimSpace(lines[1]))
+	assert.Contains(t, lines[2], "Repo", "table header follows the spacer")
+}
+
+func TestViewList_StatusIsRightAligned(t *testing.T) {
+	t.Parallel()
+
+	line := strings.Split(pagedModel().View(), "\n")[1]
+
+	assert.Equal(t, 100, lipgloss.Width(line), "padded to the full width")
+	assert.True(t, strings.HasSuffix(strings.TrimRight(line, " "), "50 loaded"))
+	assert.True(t, strings.HasPrefix(line, " "), "text sits at the right, not the left")
+}
+
+func TestViewList_StatusShowsCursorPosition(t *testing.T) {
+	t.Parallel()
+
+	m := pagedModel()
+	m.table.SetCursor(36)
+
+	assert.Contains(t, m.View(), "37 of 312 · 50 loaded")
+
+	small := loadedModel()
+	small.table.SetCursor(1)
+	assert.Contains(t, small.View(), "2 of 2", "complete lists show position out of what's loaded")
+}
+
+func TestViewList_NoPositionWithoutRows(t *testing.T) {
+	t.Parallel()
+
+	m := loadedModel()
+	m = m.handleSearchDone(searchDoneMsg{prs: nil})
+
+	assert.NotContains(t, m.statusLine(), " of ")
+}
+
+func TestViewList_StatusShowsSelectionCount(t *testing.T) {
+	t.Parallel()
+
+	m := loadedModel()
+	assert.NotContains(t, m.statusLine(), "selected")
+
+	m.selected[keyOf(m.prs[0])] = true
+	m.selected[keyOf(m.prs[1])] = true
+
+	assert.Contains(t, m.statusLine(), "2 selected")
+}
+
+func TestViewActionInput_ShowsCount(t *testing.T) {
+	t.Parallel()
+
+	m := loadedModel()
+	m, _ = m.handleListKeyByString("ctrl+a")
+	m, _ = m.handleListKeyByString("l")
+
+	assert.Contains(t, m.View(), "Label for 2 PR(s):")
+}
+
+func TestViewConfirm_RepeatsCountAtThePrompt(t *testing.T) {
+	t.Parallel()
+
+	m := loadedModel()
+	m, _ = m.handleListKeyByString("ctrl+a")
+	m, _ = m.handleListKeyByString("c")
+
+	view := m.View()
+	lastLine := view[strings.LastIndex(view, "\n")+1:]
+
+	assert.Contains(t, lastLine, "confirm 2 PR(s)")
 }

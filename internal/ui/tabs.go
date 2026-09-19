@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	baseQuery     = "is:open is:pr archived:false"
+	baseQuery     = "is:open is:pr archived:false sort:updated-desc"
 	involvesQuery = baseQuery + " involves:@me"
 	ownerQuery    = baseQuery + " owner:@me"
 

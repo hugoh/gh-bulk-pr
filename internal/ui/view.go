@@ -204,7 +204,10 @@ func (m Model) View() string {
 			"enter to run · ↑/↓ history · esc to cancel",
 		)
 	case screenActionInput:
-		return "Label: " + m.actionInput.View() + "\n" + helpStyle().Render(
+		return fmt.Sprintf(
+			"Label for %d PR(s): ",
+			len(m.selectedPRs()),
+		) + m.actionInput.View() + "\n" + helpStyle().Render(
 			"enter to continue · esc to cancel",
 		)
 	case screenConfirm:
@@ -228,14 +231,6 @@ func (m Model) viewList() string {
 		return header + "\n\n" + errStyle().Render("error: "+m.err.Error())
 	}
 
-	if summary := mergeSummary(m.prs); summary != "" {
-		header += "  " + helpStyle().Render(summary)
-	}
-
-	if m.loading {
-		header += "  " + m.spinner.View() + helpStyle().Render(" refreshing…")
-	}
-
 	list := colorMerge(colorChecks(m.table.View()), m.table.Columns())
 	if m.previewOpen {
 		if pr, ok := m.focusedPR(); ok {
@@ -244,7 +239,7 @@ func (m Model) viewList() string {
 		}
 	}
 
-	body := header + "\n\n" + list
+	body := header + "\n" + m.statusLine() + "\n" + list
 	footer := footerStyle().Render(m.footerText())
 
 	pad := max(m.height-lipgloss.Height(body)-lipgloss.Height(footer)-1, 0)
@@ -252,9 +247,70 @@ func (m Model) viewList() string {
 	return body + strings.Repeat("\n", pad) + "\n" + footer
 }
 
+// statusLine is the line under the header, right-aligned: how many PRs are
+// selected, the merge summary,
+// the cursor's position in the results, and any background activity. It is empty when
+// there is nothing to say, which keeps the spacer between header and table.
+func (m Model) statusLine() string {
+	var parts []string
+
+	if selected := len(m.selectedPRs()); selected > 0 {
+		parts = append(parts, headerStyle().Render(fmt.Sprintf("%d selected", selected)))
+	}
+
+	if summary := mergeSummary(m.prs); summary != "" {
+		parts = append(parts, helpStyle().Render(summary))
+	}
+
+	if position := m.positionText(); position != "" {
+		parts = append(parts, helpStyle().Render(position))
+	}
+
+	if m.loading {
+		parts = append(parts, m.spinner.View()+helpStyle().Render(" refreshing…"))
+	}
+
+	if m.loadingMore {
+		parts = append(parts, m.spinner.View()+helpStyle().Render(" loading more…"))
+	}
+
+	if m.moreErr != nil {
+		parts = append(parts, errStyle().Render("load more failed: "+m.moreErr.Error()))
+	}
+
+	status := strings.Join(parts, "  ")
+	if m.width == 0 {
+		return status
+	}
+
+	return lipgloss.PlaceHorizontal(m.width, lipgloss.Right, status)
+}
+
+// positionText is the cursor's place in the full result list, e.g.
+// "137 of 1482 · 250 loaded". Rows load in sort order, so the cursor index is
+// the position among all matches.
+func (m Model) positionText() string {
+	if len(m.prs) == 0 {
+		return ""
+	}
+
+	total := max(m.total, len(m.prs))
+	text := fmt.Sprintf("%d of %d", m.table.Cursor()+1, total)
+
+	if total > len(m.prs) {
+		text += fmt.Sprintf(" · %d loaded", len(m.prs))
+	}
+
+	return text
+}
+
 func (m Model) footerText() string {
 	if n := len(m.selectedPRs()); n > 0 {
-		return fmt.Sprintf("%d selected · [l]abel  [c]lose  [m]erge  [r]efresh  [Esc] clear", n)
+		return fmt.Sprintf(
+			"%d selected of %d · [l]abel  [c]lose  [m]erge  [r]efresh  [Esc] clear",
+			n,
+			max(m.total, len(m.prs)),
+		)
 	}
 
 	return "j/k move · x select · Enter/p preview · T checks · / filter · 1/2 tab · Ctrl+a all · r refresh · q quit"
@@ -321,7 +377,9 @@ func (m Model) viewConfirm() string {
 		fmt.Fprintf(&buf, "  %s %s  %s\n", pr.Repo, prNumber(pr.Number), pr.Title)
 	}
 
-	buf.WriteString("\n" + helpStyle().Render("y/enter to confirm · n/esc to cancel"))
+	buf.WriteString("\n" + helpStyle().Render(
+		fmt.Sprintf("y/enter to confirm %d PR(s) · n/esc to cancel", len(m.confirm)),
+	))
 
 	return buf.String()
 }

@@ -137,6 +137,7 @@ func TestClientActions_TransportError(t *testing.T) {
 const searchResponseJSON = `{
   "data": {
     "search": {
+      "issueCount": 312,
       "pageInfo": {"hasNextPage": %t, "endCursor": "%s"},
       "nodes": [
         {
@@ -156,38 +157,33 @@ const searchResponseJSON = `{
   }
 }`
 
-func TestSearchPRs(t *testing.T) {
+func TestSearchPage(t *testing.T) {
 	t.Parallel()
 
-	var bodies []string
+	var sent string
 
-	calls := 0
 	gql := newTestGraphQLClient(t, func(r *http.Request) (*http.Response, error) {
-		calls++
-
 		body, _ := io.ReadAll(r.Body)
-		bodies = append(bodies, string(body))
+		sent = string(body)
 
-		hasNext := calls == 1
-
-		cursor := ""
-		if hasNext {
-			cursor = "cursor1"
-		}
-
-		return jsonResponse(fmt.Sprintf(searchResponseJSON, hasNext, cursor)), nil
+		return jsonResponse(fmt.Sprintf(searchResponseJSON, true, "cursor2")), nil
 	})
 
-	client := &Client{gql: gql}
-
-	prs, err := client.SearchPRs(context.Background(), "is:open is:pr", 10)
+	page, err := (&Client{gql: gql}).SearchPage(
+		context.Background(),
+		"is:open is:pr",
+		"cursor1",
+		false,
+	)
 	require.NoError(t, err)
-	assert.Equal(t, 2, calls, "expected one page of pagination")
-	assert.Contains(t, bodies[0], `"after":null`)
-	assert.Contains(t, bodies[1], `"after":"cursor1"`)
-	require.Len(t, prs, 2)
 
-	pr := prs[0]
+	assert.Contains(t, sent, `"after":"cursor1"`)
+	assert.Equal(t, 312, page.Total)
+	assert.Equal(t, "cursor2", page.EndCursor)
+	assert.True(t, page.HasNext)
+	require.Len(t, page.PRs, 1)
+
+	pr := page.PRs[0]
 	assert.Equal(t, 1, pr.Number)
 	assert.Equal(t, "hugoh/r", pr.Repo)
 	assert.Equal(t, "hugoh", pr.Author)
@@ -195,36 +191,10 @@ func TestSearchPRs(t *testing.T) {
 	assert.Equal(t, []string{"alice"}, pr.Reviewers)
 	assert.Equal(t, ChecksPass, pr.Checks)
 	assert.Equal(t, "BEHIND", pr.MergeState)
+	assert.True(t, pr.Detailed)
 }
 
-func TestSearchPRs_LimitStopsPagination(t *testing.T) {
-	t.Parallel()
-
-	gql := newTestGraphQLClient(t, func(*http.Request) (*http.Response, error) {
-		return jsonResponse(fmt.Sprintf(searchResponseJSON, true, "cursor1")), nil
-	})
-
-	client := &Client{gql: gql}
-
-	prs, err := client.SearchPRs(context.Background(), "is:open is:pr", 1)
-	require.NoError(t, err)
-	assert.Len(t, prs, 1)
-}
-
-func TestSearchPRs_TransportError(t *testing.T) {
-	t.Parallel()
-
-	gql := newTestGraphQLClient(t, func(*http.Request) (*http.Response, error) {
-		return nil, errors.New("boom")
-	})
-
-	client := &Client{gql: gql}
-
-	_, err := client.SearchPRs(context.Background(), "is:open is:pr", 10)
-	require.Error(t, err)
-}
-
-func TestSearchPRsLight_SkipsExpensiveFields(t *testing.T) {
+func TestSearchPage_FirstPageSendsNullCursor(t *testing.T) {
 	t.Parallel()
 
 	var sent string
@@ -236,11 +206,42 @@ func TestSearchPRsLight_SkipsExpensiveFields(t *testing.T) {
 		return jsonResponse(fmt.Sprintf(searchResponseJSON, false, "")), nil
 	})
 
-	prs, err := (&Client{gql: gql}).SearchPRsLight(context.Background(), "is:open is:pr", 10)
+	page, err := (&Client{gql: gql}).SearchPage(context.Background(), "is:open is:pr", "", false)
 	require.NoError(t, err)
-	require.Len(t, prs, 1)
-	assert.Equal(t, "Fix bug", prs[0].Title)
-	assert.Equal(t, "hugoh/r", prs[0].Repo)
+
+	assert.Contains(t, sent, `"after":null`)
+	assert.False(t, page.HasNext)
+}
+
+func TestSearchPage_TransportError(t *testing.T) {
+	t.Parallel()
+
+	gql := newTestGraphQLClient(t, func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("boom")
+	})
+
+	_, err := (&Client{gql: gql}).SearchPage(context.Background(), "is:open is:pr", "", false)
+	require.Error(t, err)
+}
+
+func TestSearchPage_LightSkipsExpensiveFields(t *testing.T) {
+	t.Parallel()
+
+	var sent string
+
+	gql := newTestGraphQLClient(t, func(r *http.Request) (*http.Response, error) {
+		body, _ := io.ReadAll(r.Body)
+		sent = string(body)
+
+		return jsonResponse(fmt.Sprintf(searchResponseJSON, false, "")), nil
+	})
+
+	page, err := (&Client{gql: gql}).SearchPage(context.Background(), "is:open is:pr", "", true)
+	require.NoError(t, err)
+	require.Len(t, page.PRs, 1)
+	assert.Equal(t, "Fix bug", page.PRs[0].Title)
+	assert.Equal(t, "hugoh/r", page.PRs[0].Repo)
+	assert.False(t, page.PRs[0].Detailed)
 
 	for _, field := range []string{"mergeStateStatus", "statusCheckRollup", "reviewRequests", "labels"} {
 		assert.NotContains(t, sent, field)
