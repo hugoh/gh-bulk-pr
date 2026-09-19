@@ -206,8 +206,13 @@ const (
 // tooSmall reports whether the list can't be drawn in the current terminal.
 // The size is unknown (0) until the first WindowSizeMsg.
 func (m Model) tooSmall() bool {
-	return m.screen == screenList && m.width > 0 && m.height > 0 &&
-		(m.width < minWidth || m.height < minHeight)
+	return m.screen == screenList && !m.listFits()
+}
+
+// listFits reports whether the PR table can be drawn at the current size
+// (true while the size is still unknown).
+func (m Model) listFits() bool {
+	return m.width == 0 || m.height == 0 || (m.width >= minWidth && m.height >= minHeight)
 }
 
 // View renders the current screen, with every line cut to the terminal width
@@ -241,18 +246,9 @@ func fit(s string, width int) string {
 func (m Model) render() string {
 	switch m.screen {
 	case screenList:
-		return m.viewList()
-	case screenFilter:
-		return "Search: " + m.filterInput.View() + "\n" + helpStyle().Render(
-			"enter to run · ↑/↓ history · esc to cancel",
-		)
-	case screenActionInput:
-		return fmt.Sprintf(
-			"Label for %d PR(s): ",
-			len(m.selectedPRs()),
-		) + m.actionInput.View() + "\n" + helpStyle().Render(
-			"enter to continue · esc to cancel",
-		)
+		return m.viewList(footerStyle().Render(m.footerText()))
+	case screenFilter, screenActionInput:
+		return m.viewPrompt()
 	case screenConfirm:
 		return m.viewConfirm()
 	case screenResults:
@@ -264,32 +260,77 @@ func (m Model) render() string {
 	return ""
 }
 
-func (m Model) viewList() string {
+// viewList draws the header, the list and, on the bottom line, footer: the
+// key hints, or the prompt being typed into.
+func (m Model) viewList(footer string) string {
 	header := headerStyle().Render("gh-bulk-pr") +
 		"  " + m.tabBar() + "  " + helpStyle().Render(m.query)
 
-	if m.loading && len(m.prs) == 0 {
-		return header + "\n\n" + m.spinner.View() + " loading…"
-	}
+	var body string
 
-	if m.err != nil {
-		return header + "\n\n" + errStyle().Render("error: "+m.err.Error())
+	switch {
+	case m.loading && len(m.prs) == 0:
+		body = header + "\n\n" + m.spinner.View() + " loading…"
+	case m.err != nil:
+		body = header + "\n\n" + errStyle().Render("error: "+m.err.Error())
+	default:
+		body = header + "\n" + m.statusLine() + "\n" + m.listWithPreview()
 	}
-
-	list := colorMerge(colorChecks(m.table.View()), m.table.Columns())
-	if m.previewOpen {
-		if pr, ok := m.focusedPR(); ok {
-			sep := separatorStyle().Render(strings.Repeat("─", max(lipgloss.Width(list), 1)))
-			list = lipgloss.JoinVertical(lipgloss.Left, list, sep, previewText(pr))
-		}
-	}
-
-	body := header + "\n" + m.statusLine() + "\n" + list
-	footer := footerStyle().Render(m.footerText())
 
 	pad := max(m.height-lipgloss.Height(body)-lipgloss.Height(footer)-1, 0)
 
 	return body + strings.Repeat("\n", pad) + "\n" + footer
+}
+
+func (m Model) listWithPreview() string {
+	list := colorMerge(colorChecks(m.table.View()), m.table.Columns())
+
+	if pr, ok := m.focusedPR(); ok && m.previewOpen {
+		sep := separatorStyle().Render(strings.Repeat("─", max(lipgloss.Width(list), 1)))
+		list = lipgloss.JoinVertical(lipgloss.Left, list, sep, previewText(pr))
+	}
+
+	return list
+}
+
+// promptLabel and promptHint describe the input being typed into on the
+// filter and label screens.
+func (m Model) promptLabel() string {
+	if m.screen == screenActionInput {
+		return fmt.Sprintf("Label for %d PR(s): ", len(m.selectedPRs()))
+	}
+
+	return "Search: "
+}
+
+func (m Model) promptHint() string {
+	if m.screen == screenFilter {
+		return "enter run · ↑/↓ history · esc cancel"
+	}
+
+	if m.screen == screenActionInput {
+		return "enter continue · esc cancel"
+	}
+
+	return ""
+}
+
+// viewPrompt is the filter and label screens: the list stays visible with the
+// input on the bottom line, like the / prompt in less and vim. When the list
+// can't be drawn at this size it falls back to the bare prompt.
+func (m Model) viewPrompt() string {
+	input := m.filterInput.View()
+	if m.screen == screenActionInput {
+		input = m.actionInput.View()
+	}
+
+	line := m.promptLabel() + input
+
+	if !m.listFits() {
+		return line + "\n" + helpStyle().Render(m.promptHint())
+	}
+
+	return m.viewList(lipgloss.NewStyle().Padding(0, 1).Render(line))
 }
 
 // statusLine is the line under the header, right-aligned: how many PRs are
@@ -298,6 +339,14 @@ func (m Model) viewList() string {
 // there is nothing to say, which keeps the spacer between header and table.
 func (m Model) statusLine() string {
 	var parts []string
+
+	if hint := m.promptHint(); hint != "" {
+		parts = append(parts, helpStyle().Render(hint))
+	}
+
+	if len(parts) > 0 {
+		return m.alignRight(parts)
+	}
 
 	if selected := len(m.selectedPRs()); selected > 0 {
 		parts = append(parts, headerStyle().Render(fmt.Sprintf("%d selected", selected)))
@@ -323,6 +372,10 @@ func (m Model) statusLine() string {
 		parts = append(parts, errStyle().Render("load more failed: "+m.moreErr.Error()))
 	}
 
+	return m.alignRight(parts)
+}
+
+func (m Model) alignRight(parts []string) string {
 	status := fit(strings.Join(parts, "  "), m.width)
 	if m.width == 0 {
 		return status

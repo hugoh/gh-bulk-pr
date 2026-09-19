@@ -831,3 +831,72 @@ func TestActionDoneStartsResultsAtTheTop(t *testing.T) {
 	require.True(t, ok)
 	assert.Zero(t, mm.pane.YOffset)
 }
+
+func lastLine(view string) string { return view[strings.LastIndex(view, "\n")+1:] }
+
+func TestFilterPrompt_KeepsTheListVisible(t *testing.T) {
+	t.Parallel()
+
+	m, _ := loadedModel().handleListKeyByString("/")
+	view := m.View()
+	lines := strings.Split(view, "\n")
+
+	assert.Contains(t, view, prTitleFix, "the list stays on screen while editing the query")
+	assert.Contains(t, lines[0], "gh-bulk-pr")
+	assert.Contains(t, lines[1], "esc cancel", "the key hints replace the status line")
+	assert.Contains(t, lastLine(view), "Search: ")
+	assert.Contains(t, lastLine(view), m.query, "the prompt starts with the current query")
+	assert.LessOrEqual(t, len(lines), 30)
+}
+
+func TestLabelPrompt_KeepsTheListVisible(t *testing.T) {
+	t.Parallel()
+
+	m := loadedModel()
+	m, _ = m.handleListKeyByString("ctrl+a")
+	m, _ = m.handleListKeyByString("l")
+	view := m.View()
+
+	assert.Contains(t, view, prTitleFix)
+	assert.Contains(t, lastLine(view), "Label for 2 PR(s): ")
+	assert.Contains(t, strings.Split(view, "\n")[1], "esc cancel")
+}
+
+func TestPrompt_ShownWhileTheFirstSearchIsStillLoading(t *testing.T) {
+	t.Parallel()
+
+	m := New(nil, "q").handleResize(tea.WindowSizeMsg{Width: 100, Height: 30})
+	m, _ = m.startFilter()
+
+	view := m.View()
+
+	assert.Contains(t, view, "loading")
+	assert.Contains(t, lastLine(view), "Search: ")
+}
+
+func TestPrompt_LongInputScrollsInsteadOfOverflowing(t *testing.T) {
+	t.Parallel()
+
+	m, _ := loadedModel().handleListKeyByString("/")
+	m.filterInput.SetValue(strings.Repeat("q", 500))
+
+	assert.LessOrEqual(t, lipgloss.Width(lastLine(m.View())), 100)
+	assert.Positive(
+		t,
+		m.filterInput.Width,
+		"a width lets the input scroll to keep the cursor in view",
+	)
+}
+
+func TestPrompt_FallsBackToTheBarePromptWhenTheListCannotFit(t *testing.T) {
+	t.Parallel()
+
+	m := loadedModel().handleResize(tea.WindowSizeMsg{Width: 50, Height: 8})
+	m, _ = m.startFilter()
+
+	view := m.View()
+
+	assert.NotContains(t, view, "terminal too small")
+	assert.Contains(t, view, "Search: ")
+	assert.Contains(t, view, "esc")
+}

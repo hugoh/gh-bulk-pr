@@ -79,6 +79,11 @@ func (m Model) spinnerActive() bool {
 }
 
 const (
+	// promptInputMargin leaves room around a prompt's input: its label (up to
+	// "Label for 1000 PR(s): "), the padding and the cursor.
+	promptInputMargin = 28
+	minInputWidth     = 10
+
 	previewHeightMargin = 6
 	minListHeight       = 5
 	previewListFraction = 4 // preview open: list gets at most 1/4 of the available height
@@ -88,6 +93,8 @@ func (m Model) handleResize(msg tea.WindowSizeMsg) Model {
 	m.width, m.height = msg.Width, msg.Height
 	m.table.SetWidth(m.width)
 	m.pane.Width = m.width
+	m.filterInput.Width = max(m.width-promptInputMargin, minInputWidth)
+	m.actionInput.Width = max(m.width-promptInputMargin, minInputWidth)
 	m.pane.Height = max(m.height-paneChrome, 1)
 	m.table.SetColumns(columnsForWidth(m.width))
 	m = m.syncTableHeight()
