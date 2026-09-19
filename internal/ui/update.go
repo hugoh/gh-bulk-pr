@@ -138,7 +138,15 @@ func (m Model) handleSearchDone(msg searchDoneMsg) Model {
 // handleLightDone merges the first-pass rows into the list; it never
 // replaces detailed rows, and its errors are left for the full search to report.
 func (m Model) handleLightDone(msg searchDoneMsg) Model {
-	if msg.err != nil {
+	pending := m.loading
+	if msg.more {
+		pending = m.loadingMore
+	}
+
+	// Once the full result for this page has landed the light one has nothing
+	// to add, and any row it would append that the full page lacks (a PR
+	// updated in between) would stay a placeholder.
+	if msg.err != nil || !pending {
 		return m
 	}
 
@@ -151,15 +159,24 @@ func (m Model) handleLightDone(msg searchDoneMsg) Model {
 func (m Model) handleMoreDone(msg searchDoneMsg) Model {
 	m.loadingMore = false
 
-	if msg.err != nil {
-		m.moreErr = msg.err
-
-		return m
+	if m.cancelMore != nil {
+		m.cancelMore()
+		m.cancelMore = nil
 	}
 
-	m.moreErr = nil
-	m.prs = mergePRs(m.prs, msg.prs)
-	m = m.storePaging(msg)
+	// Rows still lacking details belong to this page's light result. Whatever
+	// the full result didn't confirm (or all of them, if it failed) goes; a
+	// retry fetches the page again.
+	if msg.err == nil {
+		m.moreErr = nil
+		m.prs = mergePRs(m.prs, msg.prs)
+		m = m.storePaging(msg)
+	} else {
+		m.moreErr = msg.err
+	}
+
+	m.prs = slices.DeleteFunc(m.prs, func(pr github.PR) bool { return !pr.Detailed })
+	m.selected = survivingSelection(m.selected, m.prs)
 
 	return m.refreshRows()
 }
@@ -212,10 +229,12 @@ func (m Model) maybeLoadMore() (Model, tea.Cmd) {
 		return m, nil
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+	m.cancelMore = cancel
 	m.loadingMore = true
 	m.moreErr = nil
 
-	return m, m.moreCmds()
+	return m, m.moreCmds(ctx)
 }
 
 func survivingSelection(selected map[prKey]bool, prs []github.PR) map[prKey]bool {
@@ -274,6 +293,11 @@ func (m Model) handleResultsKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 func (m Model) reload() (Model, tea.Cmd) {
 	if m.cancel != nil {
 		m.cancel()
+	}
+
+	if m.cancelMore != nil {
+		m.cancelMore()
+		m.cancelMore = nil
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())

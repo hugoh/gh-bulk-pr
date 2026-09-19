@@ -1217,3 +1217,106 @@ func TestSyncTableHeight_NeverNegative(t *testing.T) {
 
 	assert.GreaterOrEqual(t, m.table.Height(), 0)
 }
+
+func TestReloadCancelsTheInFlightMorePage(t *testing.T) {
+	t.Parallel()
+
+	canceled := false
+	m := pagedModel()
+	m.cancelMore = func() { canceled = true }
+
+	m, _ = reloaded(t, m)
+
+	assert.True(t, canceled, "a reload abandons the page being fetched")
+	assert.Nil(t, m.cancelMore)
+}
+
+func TestLoadingMoreKeepsACancelFunc(t *testing.T) {
+	t.Parallel()
+
+	m := pagedModel()
+	m.table.SetCursor(49)
+
+	m, cmd := m.maybeLoadMore()
+
+	require.NotNil(t, cmd)
+	assert.NotNil(t, m.cancelMore)
+}
+
+func TestFinishedMorePageReleasesItsContext(t *testing.T) {
+	t.Parallel()
+
+	released := false
+	m := pagedModel()
+	m.loadingMore = true
+	m.cancelMore = func() { released = true }
+
+	m = m.handleSearchDone(searchDoneMsg{query: "q", more: true, prs: manyPRs(51, 1, true)})
+
+	assert.True(t, released)
+	assert.Nil(t, m.cancelMore)
+}
+
+func TestLoadMore_FullDropsLightRowsItDidNotReturn(t *testing.T) {
+	t.Parallel()
+
+	m := pagedModel()
+	m.loadingMore = true
+
+	m = m.handleSearchDone(searchDoneMsg{light: true, more: true, prs: manyPRs(51, 50, false)})
+	require.Len(t, m.prs, 100)
+
+	// PR 100 was updated between the two calls and slid off this page; 101 slid on.
+	full := append(manyPRs(51, 49, true), manyPRs(101, 1, true)...)
+	m = m.handleSearchDone(
+		searchDoneMsg{query: "q", more: true, prs: full, cursor: "c2", hasNext: true},
+	)
+
+	assert.Len(t, m.prs, 100)
+
+	for _, pr := range m.prs {
+		assert.True(t, pr.Detailed, "PR %d must not be left as a placeholder row", pr.Number)
+		assert.NotEqual(t, 100, pr.Number)
+	}
+
+	assert.Equal(t, 101, m.prs[99].Number)
+}
+
+func TestLoadMore_LightAfterFullIsIgnored(t *testing.T) {
+	t.Parallel()
+
+	m := pagedModel()
+	m.loadingMore = true
+
+	m = m.handleSearchDone(searchDoneMsg{query: "q", more: true, prs: manyPRs(51, 10, true)})
+	m = m.handleSearchDone(searchDoneMsg{light: true, more: true, prs: manyPRs(51, 12, false)})
+
+	assert.Len(t, m.prs, 60, "the light page has nothing left to add once the full one landed")
+}
+
+func TestLightPageOneAfterFullIsIgnored(t *testing.T) {
+	t.Parallel()
+
+	m := pagedModel()
+	m = m.handleSearchDone(searchDoneMsg{light: true, prs: manyPRs(1, 51, false)})
+
+	assert.Len(t, m.prs, 50)
+}
+
+func TestLoadMore_FailedPageDropsItsPlaceholders(t *testing.T) {
+	t.Parallel()
+
+	m := pagedModel()
+	m.loadingMore = true
+
+	m = m.handleSearchDone(searchDoneMsg{light: true, more: true, prs: manyPRs(51, 50, false)})
+	m.selected[keyOf(m.prs[75])] = true
+	require.Len(t, m.prs, 100)
+
+	m = m.handleSearchDone(searchDoneMsg{more: true, err: assert.AnError})
+
+	assert.Len(t, m.prs, 50, "the failed page's rows go; a retry fetches them again")
+	assert.Empty(t, m.selected, "selection can't point at rows that are gone")
+	require.ErrorIs(t, m.moreErr, assert.AnError)
+	assert.Len(t, m.table.Rows(), 50)
+}

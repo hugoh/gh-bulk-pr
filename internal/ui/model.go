@@ -87,6 +87,8 @@ type Model struct {
 	searchID int // identifies the latest search; older results are dropped
 	cancel   context.CancelFunc
 
+	cancelMore context.CancelFunc // stops the further page being fetched, if any
+
 	previewOpen bool
 	err         error
 	moreErr     error // last failure loading a further page; the list stays usable

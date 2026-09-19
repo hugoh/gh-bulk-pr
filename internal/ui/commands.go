@@ -47,11 +47,8 @@ func (m Model) searchCmds(ctx context.Context) tea.Cmd {
 }
 
 // moreCmds fetches the page after m.endCursor, light and full at once: its
-// rows aren't on screen yet. ponytail: not cancelled by a reload, only
-// ignored via searchID; store a context if the wasted requests matter.
-func (m Model) moreCmds() tea.Cmd {
-	ctx := context.Background()
-
+// rows aren't on screen yet. Both stop with ctx.
+func (m Model) moreCmds(ctx context.Context) tea.Cmd {
 	return tea.Batch(
 		m.spinner.Tick,
 		m.runSearch(ctx, false, m.endCursor, true),
