@@ -19,15 +19,13 @@ const progressPollInterval = 150 * time.Millisecond
 // search it answers; light marks the fast pass that lacks checks and merge
 // state, and more marks a page after the first.
 type searchDoneMsg struct {
-	id      int
-	query   string
-	light   bool
-	more    bool
-	prs     []github.PR
-	total   int
-	cursor  string
-	hasNext bool
-	err     error
+	github.Page
+
+	id    int
+	query string
+	light bool
+	more  bool
+	err   error
 }
 
 // historyLoadedMsg delivers the past queries read for the filter bar.
@@ -70,15 +68,12 @@ func (m Model) runSearch(ctx context.Context, light bool, after string, more boo
 		page, err := client.SearchPage(ctx, query, after, light)
 
 		return searchDoneMsg{
-			id:      searchID,
-			query:   query,
-			light:   light,
-			more:    more,
-			prs:     page.PRs,
-			total:   page.Total,
-			cursor:  page.EndCursor,
-			hasNext: page.HasNext,
-			err:     err,
+			Page:  page,
+			id:    searchID,
+			query: query,
+			light: light,
+			more:  more,
+			err:   err,
 		}
 	}
 }
@@ -150,12 +145,6 @@ func actionsForKey(client *github.Client, actionKey, input string) *pendingActio
 	}
 
 	return nil
-}
-
-// needsInput reports whether the bulk action for key k needs a text prompt
-// (a label name) before it can run.
-func needsInput(k string) bool {
-	return k == "l"
 }
 
 // recordQuery appends query to the history file. It's a command so the file

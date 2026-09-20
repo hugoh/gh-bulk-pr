@@ -207,7 +207,7 @@ func (m Model) handleSearchDone(msg searchDoneMsg) Model {
 	m.err = msg.err
 
 	if msg.err == nil {
-		m.prs = msg.prs
+		m.prs = msg.PRs
 		m.selected = survivingSelection(m.selected, m.prs)
 		m = m.storePaging(msg)
 		m = m.refreshRows()
@@ -231,8 +231,8 @@ func (m Model) handleLightDone(msg searchDoneMsg) Model {
 		return m
 	}
 
-	m.total = msg.total
-	m.prs = mergePRs(m.prs, msg.prs)
+	m.total = msg.Total
+	m.prs = mergePRs(m.prs, msg.PRs)
 
 	return m.refreshRows()
 }
@@ -250,7 +250,7 @@ func (m Model) handleMoreDone(msg searchDoneMsg) Model {
 	// retry fetches the page again.
 	if msg.err == nil {
 		m.moreErr = nil
-		m.prs = mergePRs(m.prs, msg.prs)
+		m.prs = mergePRs(m.prs, msg.PRs)
 		m = m.storePaging(msg)
 	} else {
 		m.moreErr = msg.err
@@ -265,12 +265,12 @@ func (m Model) handleMoreDone(msg searchDoneMsg) Model {
 // storePaging records where the next page starts and caches everything
 // loaded so far for the current query.
 func (m Model) storePaging(msg searchDoneMsg) Model {
-	m.total, m.endCursor, m.hasMore = msg.total, msg.cursor, msg.hasNext
-	m.cache[msg.query] = results{
-		prs:     m.prs,
-		total:   m.total,
-		cursor:  m.endCursor,
-		hasMore: m.hasMore,
+	m.total, m.endCursor, m.hasMore = msg.Total, msg.EndCursor, msg.HasNext
+	m.cache[msg.query] = github.Page{
+		PRs:       m.prs,
+		Total:     m.total,
+		EndCursor: m.endCursor,
+		HasNext:   m.hasMore,
 	}
 
 	return m
@@ -362,7 +362,7 @@ func (m Model) handleResultsKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 
 	if msg.String() == keyEnter || msg.String() == keyEsc {
 		m.screen = screenList
-		m = m.withResults(results{})
+		m = m.withResults(github.Page{})
 		m.selected = map[prKey]bool{}
 		delete(m.cache, m.query)
 		m = m.refreshRows()
@@ -396,8 +396,8 @@ func (m Model) reload() (Model, tea.Cmd) {
 	return m, m.searchCmds(ctx)
 }
 
-func (m Model) withResults(res results) Model {
-	m.prs, m.total, m.endCursor, m.hasMore = res.prs, res.total, res.cursor, res.hasMore
+func (m Model) withResults(page github.Page) Model {
+	m.prs, m.total, m.endCursor, m.hasMore = page.PRs, page.Total, page.EndCursor, page.HasNext
 
 	return m
 }
@@ -601,7 +601,7 @@ func (m Model) startAction(actionKey string) (Model, tea.Cmd) {
 		return m, nil
 	}
 
-	if needsInput(actionKey) {
+	if actionKey == "l" {
 		m.actionKey = actionKey
 		m.screen = screenActionInput
 		m.actionInput.SetValue("")
@@ -812,7 +812,8 @@ func rowsFor(prs []github.PR, selected map[prKey]bool) []table.Row {
 
 		checks, merge := pendingCell, pendingCell
 		if entry.Detailed {
-			checks, merge = checksSummary(entry), mergeLabel(entry.MergeState)
+			checks, _, _ = checksDisplay(entry)
+			merge = mergeLabel(entry.MergeState)
 		}
 
 		auto := ""

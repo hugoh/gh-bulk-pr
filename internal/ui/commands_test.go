@@ -8,28 +8,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestNeedsInput(t *testing.T) {
-	t.Parallel()
-
-	tests := map[string]struct {
-		key  string
-		want bool
-	}{
-		textLabel:   {"l", true},
-		actionClose: {"c", false},
-		actionMerge: {"m", false},
-		textAuto:    {"a", false},
-	}
-
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			assert.Equal(t, tt.want, needsInput(tt.key))
-		})
-	}
-}
-
 func TestActionsForKey(t *testing.T) {
 	t.Parallel()
 
@@ -96,7 +74,7 @@ func TestActionsForKey_AutoMergeLeavesAMergedPRAlone(t *testing.T) {
 	t.Parallel()
 
 	action := actionsForKey(&github.Client{}, "a", "")
-	pull := github.PR{MergeState: mergeClean}
+	pull := github.PR{MergeState: github.MergeClean}
 
 	action.onDone(&pull)
 	assert.False(t, pull.AutoMerge, "a clean PR was merged, not given auto-merge")

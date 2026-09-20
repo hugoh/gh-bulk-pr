@@ -9,19 +9,20 @@ import (
 )
 
 const (
-	baseQuery     = "is:open is:pr archived:false sort:updated-desc"
-	involvesQuery = baseQuery + " involves:@me"
-	ownerQuery    = baseQuery + " owner:@me"
+	baseQuery = "is:open is:pr archived:false sort:updated-desc"
 
 	// DefaultQuery is the first tab's query.
-	DefaultQuery = involvesQuery
+	DefaultQuery = baseQuery + " involves:@me"
 	noTab        = -1
 )
 
 type tab struct{ name, query string }
 
 func tabs() []tab {
-	return []tab{{"involves:@me", involvesQuery}, {"owner:@me", ownerQuery}}
+	return []tab{
+		{"involves:@me", DefaultQuery},
+		{"owner:@me", baseQuery + " owner:@me"},
+	}
 }
 
 const (

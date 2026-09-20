@@ -315,7 +315,7 @@ func TestToggleAutoMerge_MergesACleanPRNow(t *testing.T) {
 		return jsonResponse(`{"data": {}}`), nil
 	})
 
-	pull := PR{ID: testNodeID, Repo: testRepo, Number: 7, MergeState: mergeClean}
+	pull := PR{ID: testNodeID, Repo: testRepo, Number: 7, MergeState: MergeClean}
 	require.NoError(t, (&Client{gql: gql, rest: rest}).ToggleAutoMerge(context.Background(), pull))
 	assert.Equal(t, http.MethodPut, gotMethod)
 	assert.Equal(t, "/repos/hugoh/gh-bulk-pr/pulls/7/merge", gotPath)

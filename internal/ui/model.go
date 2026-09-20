@@ -23,14 +23,6 @@ import (
 // the next page is fetched.
 const loadMoreMargin = 10
 
-// results is a fully loaded search: the rows plus what's needed to fetch more.
-type results struct {
-	prs     []github.PR
-	total   int
-	cursor  string
-	hasMore bool
-}
-
 type screen int
 
 const (
@@ -68,9 +60,9 @@ type Model struct {
 	filterInput textinput.Model
 	actionInput textinput.Model
 	prs         []github.PR
-	cache       map[string]results // last full result per query
-	total       int                // every match GitHub reports, loaded or not
-	endCursor   string             // where the next page starts
+	cache       map[string]github.Page // last full result per query
+	total       int                    // every match GitHub reports, loaded or not
+	endCursor   string                 // where the next page starts
 	hasMore     bool
 	selected    map[prKey]bool
 
@@ -177,7 +169,7 @@ func New(client *github.Client, query string) Model {
 		actionInput: actionTI,
 		pane:        viewport.New(),
 		selected:    map[prKey]bool{},
-		cache:       map[string]results{},
+		cache:       map[string]github.Page{},
 		loading:     true,
 		spinner:     spin,
 		progress:    prog,

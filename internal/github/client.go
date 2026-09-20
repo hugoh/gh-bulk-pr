@@ -33,7 +33,7 @@ type PR struct {
 // outright: GitHub refuses auto-merge on a PR that is already clean, so there
 // is nothing to wait for.
 func (p PR) MergesNow() bool {
-	return !p.AutoMerge && p.MergeState == mergeClean
+	return !p.AutoMerge && p.MergeState == MergeClean
 }
 
 // Page is one page of search results plus what's needed to fetch the next.
@@ -44,7 +44,8 @@ type Page struct {
 	HasNext   bool
 }
 
-const mergeClean = "CLEAN"
+// MergeClean is mergeStateStatus for a PR with nothing left to wait for.
+const MergeClean = "CLEAN"
 
 // Check states reported in PR.Checks.
 const (

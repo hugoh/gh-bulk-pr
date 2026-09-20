@@ -53,7 +53,7 @@ func testPRs() []github.PR {
 func loadedModel() Model {
 	m := New(nil, "is:open is:pr")
 	m = m.handleResize(tea.WindowSizeMsg{Width: 100, Height: 30})
-	m = m.handleSearchDone(searchDoneMsg{prs: testPRs()})
+	m = m.handleSearchDone(searchDoneMsg{PRs: testPRs()})
 
 	return m
 }
@@ -141,7 +141,7 @@ func TestHandleSearchDone(t *testing.T) {
 		t.Parallel()
 
 		m := New(nil, "q")
-		m = m.handleSearchDone(searchDoneMsg{prs: testPRs()})
+		m = m.handleSearchDone(searchDoneMsg{PRs: testPRs()})
 
 		assert.False(t, m.loading)
 		require.NoError(t, m.err)
@@ -466,7 +466,7 @@ func TestListKey_AutoMerge(t *testing.T) {
 
 			m := loadedModel()
 			for _, idx := range tt.cleanPRs {
-				m.prs[idx].MergeState = mergeClean
+				m.prs[idx].MergeState = github.MergeClean
 			}
 
 			for _, pull := range m.prs {
@@ -578,7 +578,7 @@ func TestUpdate_SearchDone(t *testing.T) {
 	t.Parallel()
 
 	m := New(nil, "q")
-	updated, _ := m.Update(searchDoneMsg{prs: testPRs()})
+	updated, _ := m.Update(searchDoneMsg{PRs: testPRs()})
 
 	mm, ok := updated.(Model)
 	require.True(t, ok)
@@ -764,10 +764,12 @@ func TestHandleListKey_ToggleSelection_SameNumberInDifferentRepos(t *testing.T) 
 
 	m := New(nil, "is:open is:pr")
 	m = m.handleResize(tea.WindowSizeMsg{Width: 100, Height: 30})
-	m = m.handleSearchDone(searchDoneMsg{prs: []github.PR{
-		{Number: 7, Title: "First", Repo: testRepoA, Author: testAuthor},
-		{Number: 7, Title: "Second", Repo: testRepoB, Author: testAuthor},
-	}})
+	m = m.handleSearchDone(searchDoneMsg{
+		PRs: []github.PR{
+			{Number: 7, Title: "First", Repo: testRepoA, Author: testAuthor},
+			{Number: 7, Title: "Second", Repo: testRepoB, Author: testAuthor},
+		},
+	})
 
 	m, _ = m.handleListKeyByString("x")
 
@@ -861,7 +863,7 @@ func TestListKey_TabKeepsClosedState(t *testing.T) {
 
 	assert.Equal(t, 1, m.tab)
 	assert.Contains(t, m.query, "is:closed")
-	assert.Contains(t, m.query, "involves:@me")
+	assert.Contains(t, m.query, "owner:@me")
 }
 
 func TestTabs(t *testing.T) {
@@ -1005,7 +1007,7 @@ func TestSearchIgnoresStaleResults(t *testing.T) {
 	require.Greater(t, m.searchID, firstID)
 
 	m = m.handleSearchDone(
-		searchDoneMsg{id: firstID, prs: []github.PR{{Number: 99, Repo: testRepoA}}},
+		searchDoneMsg{PRs: []github.PR{{Number: 99, Repo: testRepoA}}, id: firstID},
 	)
 
 	assert.True(t, m.loading, "stale result must not end the loading state")
@@ -1028,14 +1030,14 @@ func TestTabSwitchUsesCache(t *testing.T) {
 	t.Parallel()
 
 	m := New(nil, tabs()[0].query)
-	m = m.handleSearchDone(searchDoneMsg{query: tabs()[0].query, prs: testPRs()})
+	m = m.handleSearchDone(searchDoneMsg{PRs: testPRs(), query: tabs()[0].query})
 
 	m, _ = m.handleListKeyByString("2")
 	assert.Empty(t, m.prs, "uncached tab starts empty rather than showing another query's rows")
 	assert.Empty(t, m.table.Rows())
 
 	other := []github.PR{{Number: 5, Title: "Mine", Repo: testRepoA, Author: testAuthor}}
-	m = m.handleSearchDone(searchDoneMsg{id: m.searchID, query: tabs()[1].query, prs: other})
+	m = m.handleSearchDone(searchDoneMsg{PRs: other, id: m.searchID, query: tabs()[1].query})
 
 	m, cmd := m.handleListKeyByString("1")
 	assert.Equal(t, testPRs(), m.prs, "cached rows show immediately")
@@ -1051,7 +1053,7 @@ func TestRefreshKeepsSelectionOfSurvivingPRs(t *testing.T) {
 	m.selected[keyOf(m.prs[0])] = true
 	m.selected[keyOf(m.prs[1])] = true
 
-	m = m.handleSearchDone(searchDoneMsg{prs: testPRs()[:1]})
+	m = m.handleSearchDone(searchDoneMsg{PRs: testPRs()[:1]})
 
 	assert.Equal(t, map[prKey]bool{keyOf(testPRs()[0]): true}, m.selected)
 }
@@ -1071,7 +1073,7 @@ func TestFinishingActionForcesFullReload(t *testing.T) {
 	t.Parallel()
 
 	m := loadedModel()
-	m.cache[m.query] = results{prs: m.prs}
+	m.cache[m.query] = github.Page{PRs: m.prs}
 	m.screen = screenResults
 	m.results = []worker.Result{{}}
 
@@ -1090,17 +1092,17 @@ func TestLightSearchThenFull(t *testing.T) {
 
 	m := New(nil, "q")
 
-	m = m.handleSearchDone(searchDoneMsg{light: true, prs: light})
+	m = m.handleSearchDone(searchDoneMsg{PRs: light, light: true})
 	assert.Equal(t, light, m.prs, "light result paints the list")
 	assert.True(t, m.loading, "still waiting for the full result")
 	assert.Equal(t, "…", m.table.Rows()[0][4], "checks column is a placeholder until details land")
 	assert.Equal(t, "…", m.table.Rows()[0][5], "merge column is a placeholder until details land")
 
-	m = m.handleSearchDone(searchDoneMsg{prs: testPRs()})
+	m = m.handleSearchDone(searchDoneMsg{PRs: testPRs()})
 	assert.Equal(t, testPRs(), m.prs)
 	assert.False(t, m.loading)
 
-	m = m.handleSearchDone(searchDoneMsg{light: true, prs: light})
+	m = m.handleSearchDone(searchDoneMsg{PRs: light, light: true})
 	assert.Equal(t, testPRs(), m.prs, "late light result must not clobber the full one")
 }
 
@@ -1147,7 +1149,8 @@ func pagedModel() Model {
 	m := New(nil, "q").handleResize(tea.WindowSizeMsg{Width: 100, Height: 30})
 
 	return m.handleSearchDone(searchDoneMsg{
-		query: "q", prs: manyPRs(1, 50, true), total: 312, cursor: "c1", hasNext: true,
+		PRs: manyPRs(1, 50, true), Total: 312, EndCursor: "c1", HasNext: true,
+		query: "q",
 	})
 }
 
@@ -1157,7 +1160,7 @@ func lightNextPageModel(t *testing.T) Model {
 	m := pagedModel()
 	m.loadingMore = true
 
-	m = m.handleSearchDone(searchDoneMsg{light: true, more: true, prs: manyPRs(51, 50, false)})
+	m = m.handleSearchDone(searchDoneMsg{PRs: manyPRs(51, 50, false), light: true, more: true})
 	require.Len(t, m.prs, 100)
 
 	return m
@@ -1171,14 +1174,19 @@ func TestFullPageStoresPaging(t *testing.T) {
 	assert.Equal(t, 312, m.total)
 	assert.Equal(t, "c1", m.endCursor)
 	assert.True(t, m.hasMore)
-	assert.Equal(t, results{prs: m.prs, total: 312, cursor: "c1", hasMore: true}, m.cache["q"])
+	assert.Equal(
+		t,
+		github.Page{PRs: m.prs, Total: 312, EndCursor: "c1", HasNext: true},
+		m.cache["q"],
+	)
 }
 
 func TestLightPageSetsTotalOnly(t *testing.T) {
 	t.Parallel()
 
 	m := New(nil, "q").handleSearchDone(searchDoneMsg{
-		light: true, prs: manyPRs(1, 3, false), total: 312, cursor: "c1", hasNext: true,
+		PRs: manyPRs(1, 3, false), Total: 312, EndCursor: "c1", HasNext: true,
+		light: true,
 	})
 
 	assert.Equal(t, 312, m.total)
@@ -1191,7 +1199,7 @@ func TestLightNeverOverwritesDetailedRow(t *testing.T) {
 	t.Parallel()
 
 	m := pagedModel()
-	m = m.handleSearchDone(searchDoneMsg{light: true, prs: manyPRs(1, 1, false)})
+	m = m.handleSearchDone(searchDoneMsg{PRs: manyPRs(1, 1, false), light: true})
 
 	assert.True(t, m.prs[0].Detailed)
 	assert.Equal(t, github.ChecksPass, m.prs[0].Checks)
@@ -1205,14 +1213,20 @@ func TestLoadMore_LightThenFull(t *testing.T) {
 	m.loadingMore = true
 
 	m = m.handleSearchDone(
-		searchDoneMsg{light: true, more: true, prs: manyPRs(51, 50, false), total: 312},
+		searchDoneMsg{PRs: manyPRs(51, 50, false), Total: 312, light: true, more: true},
 	)
 	assert.Len(t, m.prs, 100, "light rows are appended right away")
 	assert.Equal(t, "…", m.table.Rows()[50][4])
 	assert.True(t, m.loadingMore, "still waiting for the full page")
 
 	m = m.handleSearchDone(
-		searchDoneMsg{query: "q", more: true, prs: manyPRs(51, 50, true), total: 312, cursor: "c2"},
+		searchDoneMsg{
+			PRs:       manyPRs(51, 50, true),
+			Total:     312,
+			EndCursor: "c2",
+			query:     "q",
+			more:      true,
+		},
 	)
 	assert.Len(t, m.prs, 100, "full rows replace the light ones in place")
 	assert.True(t, m.prs[99].Detailed)
@@ -1220,8 +1234,8 @@ func TestLoadMore_LightThenFull(t *testing.T) {
 	assert.False(t, m.loadingMore)
 	assert.Equal(t, "c2", m.endCursor)
 	assert.False(t, m.hasMore)
-	assert.Len(t, m.cache["q"].prs, 100)
-	assert.Equal(t, "c2", m.cache["q"].cursor)
+	assert.Len(t, m.cache["q"].PRs, 100)
+	assert.Equal(t, "c2", m.cache["q"].EndCursor)
 }
 
 func TestLoadMore_FullBeforeLight(t *testing.T) {
@@ -1231,9 +1245,9 @@ func TestLoadMore_FullBeforeLight(t *testing.T) {
 	m.loadingMore = true
 
 	m = m.handleSearchDone(
-		searchDoneMsg{more: true, prs: manyPRs(51, 50, true), cursor: "c2", hasNext: true},
+		searchDoneMsg{PRs: manyPRs(51, 50, true), EndCursor: "c2", HasNext: true, more: true},
 	)
-	m = m.handleSearchDone(searchDoneMsg{light: true, more: true, prs: manyPRs(51, 50, false)})
+	m = m.handleSearchDone(searchDoneMsg{PRs: manyPRs(51, 50, false), light: true, more: true})
 
 	assert.Len(t, m.prs, 100)
 	assert.True(t, m.prs[99].Detailed, "late light page must not downgrade rows")
@@ -1245,7 +1259,7 @@ func TestLoadMore_DedupesShiftedResults(t *testing.T) {
 	m := pagedModel()
 	m.loadingMore = true
 
-	m = m.handleSearchDone(searchDoneMsg{more: true, prs: manyPRs(50, 50, true)})
+	m = m.handleSearchDone(searchDoneMsg{PRs: manyPRs(50, 50, true), more: true})
 
 	assert.Len(t, m.prs, 99, "PR 50 was already on the first page")
 }
@@ -1275,7 +1289,7 @@ func TestLoadMore_StaleResultDroppedAfterReload(t *testing.T) {
 	m, _ = reloaded(t, m)
 	assert.False(t, m.loadingMore, "a new search abandons the in-flight page")
 
-	m = m.handleSearchDone(searchDoneMsg{id: staleID, more: true, prs: manyPRs(51, 50, true)})
+	m = m.handleSearchDone(searchDoneMsg{PRs: manyPRs(51, 50, true), id: staleID, more: true})
 	assert.Len(t, m.prs, 50)
 }
 
@@ -1354,11 +1368,8 @@ func TestTabSwitchRestoresPaging(t *testing.T) {
 	m := New(nil, first)
 	m = m.handleSearchDone(
 		searchDoneMsg{
-			query:   first,
-			prs:     manyPRs(1, 50, true),
-			total:   312,
-			cursor:  "c1",
-			hasNext: true,
+			PRs: manyPRs(1, 50, true), Total: 312, EndCursor: "c1", HasNext: true,
+			query: first,
 		},
 	)
 
@@ -1515,7 +1526,7 @@ func TestFinishedMorePageReleasesItsContext(t *testing.T) {
 	m.loadingMore = true
 	m.cancelMore = func() { released = true }
 
-	m = m.handleSearchDone(searchDoneMsg{query: "q", more: true, prs: manyPRs(51, 1, true)})
+	m = m.handleSearchDone(searchDoneMsg{PRs: manyPRs(51, 1, true), query: "q", more: true})
 
 	assert.True(t, released)
 	assert.Nil(t, m.cancelMore)
@@ -1529,7 +1540,7 @@ func TestLoadMore_FullDropsLightRowsItDidNotReturn(t *testing.T) {
 	// PR 100 was updated between the two calls and slid off this page; 101 slid on.
 	full := append(manyPRs(51, 49, true), manyPRs(101, 1, true)...)
 	m = m.handleSearchDone(
-		searchDoneMsg{query: "q", more: true, prs: full, cursor: "c2", hasNext: true},
+		searchDoneMsg{PRs: full, EndCursor: "c2", HasNext: true, query: "q", more: true},
 	)
 
 	assert.Len(t, m.prs, 100)
@@ -1548,8 +1559,8 @@ func TestLoadMore_LightAfterFullIsIgnored(t *testing.T) {
 	m := pagedModel()
 	m.loadingMore = true
 
-	m = m.handleSearchDone(searchDoneMsg{query: "q", more: true, prs: manyPRs(51, 10, true)})
-	m = m.handleSearchDone(searchDoneMsg{light: true, more: true, prs: manyPRs(51, 12, false)})
+	m = m.handleSearchDone(searchDoneMsg{PRs: manyPRs(51, 10, true), query: "q", more: true})
+	m = m.handleSearchDone(searchDoneMsg{PRs: manyPRs(51, 12, false), light: true, more: true})
 
 	assert.Len(t, m.prs, 60, "the light page has nothing left to add once the full one landed")
 }
@@ -1558,7 +1569,7 @@ func TestLightPageOneAfterFullIsIgnored(t *testing.T) {
 	t.Parallel()
 
 	m := pagedModel()
-	m = m.handleSearchDone(searchDoneMsg{light: true, prs: manyPRs(1, 51, false)})
+	m = m.handleSearchDone(searchDoneMsg{PRs: manyPRs(1, 51, false), light: true})
 
 	assert.Len(t, m.prs, 50)
 }
@@ -1798,7 +1809,7 @@ func TestOpenInBrowser(t *testing.T) {
 
 			m := browserModel(0, &opened, nil)
 			if tt.noRows {
-				m = m.withResults(results{}).refreshRows()
+				m = m.withResults(github.Page{}).refreshRows()
 			}
 
 			m.table.SetCursor(tt.cursor)
