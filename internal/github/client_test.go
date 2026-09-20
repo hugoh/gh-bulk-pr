@@ -48,7 +48,10 @@ func newTestGraphQLClient(t *testing.T, rt roundTripFunc) *api.GraphQLClient {
 	return client
 }
 
-const testRepo = "hugoh/gh-bulk-pr"
+const (
+	testRepo   = "hugoh/gh-bulk-pr"
+	testNodeID = "PR_1"
+)
 
 func TestClientActions(t *testing.T) {
 	t.Parallel()
@@ -141,8 +144,10 @@ const searchResponseJSON = `{
       "pageInfo": {"hasNextPage": %t, "endCursor": "%s"},
       "nodes": [
         {
+          "id": "PR_node1",
           "number": 1,
           "title": "Fix bug",
+          "autoMergeRequest": {"enabledAt": "2026-09-20T00:00:00Z"},
           "url": "https://github.com/hugoh/r/pull/1",
           "body": "body",
           "mergeStateStatus": "BEHIND",
@@ -202,6 +207,8 @@ func TestSearchPage(t *testing.T) {
 	assert.Equal(t, []string{"alice"}, pr.Reviewers)
 	assert.Equal(t, ChecksPass, pr.Checks)
 	assert.Equal(t, "BEHIND", pr.MergeState)
+	assert.Equal(t, "PR_node1", pr.ID)
+	assert.True(t, pr.AutoMerge)
 	assert.True(t, pr.Detailed)
 }
 
@@ -243,8 +250,106 @@ func TestSearchPage_LightSkipsExpensiveFields(t *testing.T) {
 	assert.Equal(t, "Fix bug", page.PRs[0].Title)
 	assert.Equal(t, "hugoh/r", page.PRs[0].Repo)
 	assert.False(t, page.PRs[0].Detailed)
+	assert.True(t, page.PRs[0].AutoMerge, "auto-merge is cheap, so the light pass carries it")
+	assert.Equal(t, "PR_node1", page.PRs[0].ID)
 
 	for _, field := range []string{"mergeStateStatus", "statusCheckRollup", "reviewRequests", "labels"} {
 		assert.NotContains(t, sent, field)
 	}
+}
+
+func TestToggleAutoMerge(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		pr        PR
+		wantQuery string
+		wantVars  string
+	}{
+		"enables when off": {
+			pr:        PR{ID: testNodeID},
+			wantQuery: "enablePullRequestAutoMerge",
+			wantVars:  "mergeMethod: SQUASH",
+		},
+		"disables when on": {
+			pr:        PR{ID: testNodeID, AutoMerge: true},
+			wantQuery: "disablePullRequestAutoMerge",
+			wantVars:  "disablePullRequestAutoMerge(input: {pullRequestId: $id})",
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var sent string
+
+			gql := newTestGraphQLClient(t, func(r *http.Request) (*http.Response, error) {
+				body, _ := io.ReadAll(r.Body)
+				sent = string(body)
+
+				return jsonResponse(`{"data": {}}`), nil
+			})
+
+			require.NoError(t, (&Client{gql: gql}).ToggleAutoMerge(context.Background(), tt.pr))
+			assert.Contains(t, sent, tt.wantQuery)
+			assert.Contains(t, sent, tt.wantVars)
+			assert.Contains(t, sent, `"id":"`+testNodeID+`"`)
+		})
+	}
+}
+
+func TestToggleAutoMerge_MergesACleanPRNow(t *testing.T) {
+	t.Parallel()
+
+	var gotMethod, gotPath string
+
+	rest := newTestRESTClient(t, func(r *http.Request) (*http.Response, error) {
+		gotMethod, gotPath = r.Method, r.URL.Path
+
+		return jsonResponse("{}"), nil
+	})
+	gql := newTestGraphQLClient(t, func(*http.Request) (*http.Response, error) {
+		t.Error("GitHub refuses auto-merge on a clean PR, so it must not be asked to")
+
+		return jsonResponse(`{"data": {}}`), nil
+	})
+
+	pull := PR{ID: testNodeID, Repo: testRepo, Number: 7, MergeState: mergeClean}
+	require.NoError(t, (&Client{gql: gql, rest: rest}).ToggleAutoMerge(context.Background(), pull))
+	assert.Equal(t, http.MethodPut, gotMethod)
+	assert.Equal(t, "/repos/hugoh/gh-bulk-pr/pulls/7/merge", gotPath)
+}
+
+func TestMergesNow(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		pr   PR
+		want bool
+	}{
+		"clean":                 {PR{MergeState: "CLEAN"}, true},
+		"clean with auto-merge": {PR{MergeState: "CLEAN", AutoMerge: true}, false},
+		"behind":                {PR{MergeState: "BEHIND"}, false},
+		"details not loaded":    {PR{}, false},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			require.Equal(t, tt.want, tt.pr.MergesNow())
+		})
+	}
+}
+
+func TestToggleAutoMerge_Error(t *testing.T) {
+	t.Parallel()
+
+	gql := newTestGraphQLClient(t, func(*http.Request) (*http.Response, error) {
+		return jsonResponse(`{"errors": [{"message": "Pull request is in clean status"}]}`), nil
+	})
+
+	err := (&Client{gql: gql}).ToggleAutoMerge(context.Background(), PR{ID: testNodeID})
+	require.ErrorContains(t, err, "clean status")
 }

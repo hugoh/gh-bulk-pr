@@ -21,6 +21,8 @@ gh bulk-pr --query "is:open is:pr author:@me archived:false"
 Press `?` in the app for this list.
 
 {{ .KeysTable }}
+`a` toggles squash auto-merge on each selected PR: it enables it where it is off and disables it where it is on. PRs with auto-merge enabled show `on` in the Auto column. A PR that is already ready to merge has nothing to wait for (GitHub refuses auto-merge on it), so `a` squash-merges it right away; the confirm screen marks those PRs `merges now` and needs an explicit `y`. Repos with auto-merge turned off fail for the PRs that need it.
+
 `ctrl+c` quits at once from any screen; `q` needs a second press while PRs are selected. `O` asks for confirmation above {{ .OpenAllConfirmAbove }} PRs and opens at most {{ .OpenAllMax }}.
 
 Tabs (`1`/`2`): {{ range $i, $t := .Tabs }}{{ if $i }}, {{ end }}`{{ $t }}`{{ end }}. All share the base query `{{ .BaseQuery }}`. Editing the query with `/` deselects the tab unless it still matches one.

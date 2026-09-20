@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"charm.land/bubbles/v2/spinner"
@@ -24,6 +25,7 @@ const (
 	textShort   = "short"
 	actionClose = "close"
 	actionMerge = "merge"
+	textAuto    = "auto"
 	prTitleFix  = "Fix bug"
 	testAuthor  = "hugoh"
 	testRepoA   = "hugoh/a"
@@ -436,6 +438,51 @@ func TestHandleConfirmKey_DestructiveNeedsY(t *testing.T) {
 	}
 }
 
+func TestListKey_AutoMerge(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		cleanPRs        []int // indexes into the two loaded PRs that are already clean
+		wantDestructive bool
+		wantMergesNow   int
+	}{
+		"none clean stays easy": {},
+		"one clean needs an explicit yes": {
+			cleanPRs:        []int{1},
+			wantDestructive: true,
+			wantMergesNow:   1,
+		},
+		"all clean": {
+			cleanPRs:        []int{0, 1},
+			wantDestructive: true,
+			wantMergesNow:   2,
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := loadedModel()
+			for _, idx := range tt.cleanPRs {
+				m.prs[idx].MergeState = mergeClean
+			}
+
+			for _, pull := range m.prs {
+				m.selected[keyOf(pull)] = true
+			}
+
+			m, _ = m.handleListKeyByString("a")
+
+			require.Equal(t, screenConfirm, m.screen)
+			require.NotNil(t, m.action)
+			assert.Equal(t, "toggle auto-merge", m.action.label)
+			assert.Equal(t, tt.wantDestructive, m.action.destructive)
+			assert.Equal(t, tt.wantMergesNow, strings.Count(m.confirmBody(), "merges now"))
+		})
+	}
+}
+
 func TestHandleResultsKey(t *testing.T) {
 	t.Parallel()
 
@@ -501,7 +548,17 @@ func TestRowsFor(t *testing.T) {
 	assert.Equal(t, "x", rows[1][0])
 	assert.Equal(t, "#1", rows[0][2])
 	assert.Equal(t, "behind", rows[0][5])
-	assert.Equal(t, testAuthor, rows[0][6])
+	assert.Empty(t, rows[0][6], "no auto-merge cell when it is off")
+	assert.Equal(t, testAuthor, rows[0][7])
+}
+
+func TestRowsFor_ShowsAutoMerge(t *testing.T) {
+	t.Parallel()
+
+	light := github.PR{Number: 1, AutoMerge: true}
+	rows := rowsFor([]github.PR{light}, nil)
+
+	assert.Equal(t, "on", rows[0][6], "auto-merge comes with the light search, before details land")
 }
 
 func TestUpdate_WindowSize(t *testing.T) {
@@ -538,6 +595,28 @@ func TestUpdate_ActionDone(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, screenResults, mm.screen)
 	assert.Nil(t, cmd)
+}
+
+func TestUpdate_ActionDone_AppliesOnDoneToSucceededPRs(t *testing.T) {
+	t.Parallel()
+
+	m := loadedModel()
+	m.action = &pendingAction{
+		label:  "toggle auto-merge",
+		onDone: func(pr *github.PR) { pr.AutoMerge = !pr.AutoMerge },
+	}
+
+	prs := testPRs()
+	updated, _ := m.Update(actionDoneMsg{results: []worker.Result{
+		{PR: prs[0]},
+		{PR: prs[1], Err: errors.New("boom")},
+	}})
+
+	mm, ok := updated.(Model)
+	require.True(t, ok)
+	assert.True(t, mm.prs[0].AutoMerge)
+	assert.False(t, mm.prs[1].AutoMerge, "a failed PR keeps its state")
+	assert.Equal(t, "on", mm.table.Rows()[0][6])
 }
 
 func TestUpdate_ActionProgress(t *testing.T) {

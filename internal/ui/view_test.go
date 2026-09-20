@@ -95,6 +95,8 @@ func TestPreviewText(t *testing.T) {
 	}
 
 	got := previewText(pr)
+	assert.NotContains(t, got, "auto-merge")
+	assert.Contains(t, ansi.Strip(previewText(github.PR{AutoMerge: true})), "auto-merge")
 	assert.Contains(t, got, "merge: behind")
 	assert.Contains(t, got, prTitleFix)
 	assert.Contains(t, got, testRepoA)

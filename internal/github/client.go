@@ -14,6 +14,7 @@ import (
 
 // PR is the subset of pull request data the list and preview views need.
 type PR struct {
+	ID         string // GraphQL node ID, which the auto-merge mutations need
 	Number     int
 	Title      string
 	Repo       string // "owner/name"
@@ -21,10 +22,18 @@ type PR struct {
 	Labels     []string
 	Reviewers  []string
 	Checks     string // ChecksPass, ChecksFail, or "" when there are none
+	AutoMerge  bool   // auto-merge is enabled: it merges once its requirements pass
 	MergeState string // raw GraphQL mergeStateStatus, e.g. "CLEAN", "BEHIND"
 	Body       string
 	URL        string
 	Detailed   bool // false for rows from the light search: no checks, merge state, labels or reviewers
+}
+
+// MergesNow reports whether toggling auto-merge on this PR merges it
+// outright: GitHub refuses auto-merge on a PR that is already clean, so there
+// is nothing to wait for.
+func (p PR) MergesNow() bool {
+	return !p.AutoMerge && p.MergeState == mergeClean
 }
 
 // Page is one page of search results plus what's needed to fetch the next.
@@ -34,6 +43,8 @@ type Page struct {
 	EndCursor string
 	HasNext   bool
 }
+
+const mergeClean = "CLEAN"
 
 // Check states reported in PR.Checks.
 const (
@@ -79,11 +90,13 @@ query($q: String!, $count: Int!, $after: String) {
 	// lightFields is enough to paint the list; GitHub answers it about twice
 	// as fast as the full set because it skips merge state and check rollups.
 	lightFields = `
+        id
         number
         title
         url
         repository { nameWithOwner }
-        author { login }`
+        author { login }
+        autoMergeRequest { enabledAt }`
 
 	fullFields = lightFields + `
         body
@@ -110,6 +123,8 @@ type searchResponse struct {
 }
 
 type searchNode struct {
+	ID               string
+	AutoMergeRequest *struct{ EnabledAt string }
 	Number           int
 	Title            string
 	URL              string
@@ -186,6 +201,8 @@ func (c *Client) SearchPage(ctx context.Context, query, after string, light bool
 
 func prFromNode(node searchNode) PR {
 	result := PR{
+		ID:         node.ID,
+		AutoMerge:  node.AutoMergeRequest != nil,
 		Number:     node.Number,
 		Title:      node.Title,
 		Repo:       node.Repository.NameWithOwner,
@@ -238,6 +255,37 @@ func (c *Client) MergePR(ctx context.Context, pr PR) error {
 	return c.do(ctx, "merge pr", http.MethodPut,
 		fmt.Sprintf("repos/%s/pulls/%d/merge", pr.Repo, pr.Number),
 		map[string]string{"merge_method": "squash"})
+}
+
+const (
+	enableAutoMergeMutation = `
+mutation($id: ID!) {
+  enablePullRequestAutoMerge(input: {pullRequestId: $id, mergeMethod: SQUASH}) { clientMutationId }
+}`
+	disableAutoMergeMutation = `
+mutation($id: ID!) {
+  disablePullRequestAutoMerge(input: {pullRequestId: $id}) { clientMutationId }
+}`
+)
+
+// ToggleAutoMerge turns auto-merge (squash) off for a PR that has it on, and
+// on for one that doesn't. A PR that is already clean has nothing to wait
+// for, so it is squash-merged instead (see PR.MergesNow).
+func (c *Client) ToggleAutoMerge(ctx context.Context, pull PR) error {
+	if pull.MergesNow() {
+		return c.MergePR(ctx, pull)
+	}
+
+	mutation := enableAutoMergeMutation
+	if pull.AutoMerge {
+		mutation = disableAutoMergeMutation
+	}
+
+	if err := c.gql.DoWithContext(ctx, mutation, map[string]any{"id": pull.ID}, nil); err != nil {
+		return fmt.Errorf("toggle auto-merge: %w", err)
+	}
+
+	return nil
 }
 
 func (c *Client) do(ctx context.Context, what, method, path string, body any) error {

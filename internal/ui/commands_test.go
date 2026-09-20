@@ -18,6 +18,7 @@ func TestNeedsInput(t *testing.T) {
 		textLabel:   {"l", true},
 		actionClose: {"c", false},
 		actionMerge: {"m", false},
+		textAuto:    {"a", false},
 	}
 
 	for name, tt := range tests {
@@ -42,6 +43,7 @@ func TestActionsForKey(t *testing.T) {
 		textLabel:   {"l", "bug", `add label "bug"`},
 		actionClose: {"c", "", actionClose},
 		actionMerge: {"m", "", actionMerge},
+		textAuto:    {"a", "", "toggle auto-merge"},
 		"unknown":   {"z", "", ""},
 	}
 
@@ -83,4 +85,33 @@ func TestActionsForKey_Destructive(t *testing.T) {
 	assert.False(t, actionsForKey(client, "l", "bug").destructive, "labelling is easy to undo")
 	assert.True(t, actionsForKey(client, "c", "").destructive)
 	assert.True(t, actionsForKey(client, "m", "").destructive)
+	assert.False(
+		t,
+		actionsForKey(client, "a", "").destructive,
+		"toggling auto-merge is easy to undo",
+	)
+}
+
+func TestActionsForKey_AutoMergeLeavesAMergedPRAlone(t *testing.T) {
+	t.Parallel()
+
+	action := actionsForKey(&github.Client{}, "a", "")
+	pull := github.PR{MergeState: mergeClean}
+
+	action.onDone(&pull)
+	assert.False(t, pull.AutoMerge, "a clean PR was merged, not given auto-merge")
+}
+
+func TestActionsForKey_AutoMergeFlipsLocalState(t *testing.T) {
+	t.Parallel()
+
+	action := actionsForKey(&github.Client{}, "a", "")
+	require.NotNil(t, action.onDone)
+
+	pr := github.PR{AutoMerge: false}
+	action.onDone(&pr)
+	assert.True(t, pr.AutoMerge)
+
+	action.onDone(&pr)
+	assert.False(t, pr.AutoMerge)
 }

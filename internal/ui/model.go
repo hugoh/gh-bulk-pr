@@ -46,6 +46,8 @@ type pendingAction struct {
 	label       string // human-readable name for the confirm/results screens
 	destructive bool   // hard to undo: only an explicit "y" confirms it, never enter
 	run         func(ctx context.Context, pr github.PR) error
+	onDone      func(pr *github.PR)       // optional: brings a succeeded PR's local copy up to date
+	note        func(pr github.PR) string // optional: what this action does to pr, when it isn't obvious
 }
 
 // Model is the bubbletea model driving the PR list, preview panel, filter
@@ -110,11 +112,12 @@ const (
 	colTitleMin = 20
 	colChecks   = 8
 	colMerge    = 8
+	colAuto     = 4
 	colAuthor   = 12
-	numCols     = 7
+	numCols     = 8
 	cellPadding = 2 // bubbles/table's default Cell style: Padding(0, 1), left+right
 
-	fixedColsSum       = colSelect + colRepo + colNumber + colChecks + colMerge + colAuthor
+	fixedColsSum       = colSelect + colRepo + colNumber + colChecks + colMerge + colAuto + colAuthor
 	tableOverhead      = numCols * cellPadding
 	defaultTableHeight = 20
 )
@@ -133,6 +136,7 @@ func columnsForWidth(width int) []table.Column {
 		{Title: "Title", Width: titleWidth},
 		{Title: "Checks", Width: colChecks},
 		{Title: "Merge", Width: colMerge},
+		{Title: "Auto", Width: colAuto},
 		{Title: "Author", Width: colAuthor},
 	}
 }

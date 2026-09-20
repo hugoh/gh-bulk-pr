@@ -470,8 +470,13 @@ func previewChecks(item github.PR) string {
 
 func previewMerge(item github.PR) string {
 	label := mergeLabel(item.MergeState)
+	text := "merge: " + label
 
-	return mergeStyle(label).Render("merge: " + label)
+	if item.AutoMerge {
+		text += " · auto-merge"
+	}
+
+	return mergeStyle(label).Render(text)
 }
 
 func previewText(item github.PR) string {
@@ -545,6 +550,11 @@ func (m Model) confirmBody() string {
 	lines := make([]string, len(m.confirm))
 	for i, pr := range m.confirm {
 		lines[i] = fmt.Sprintf("  %s %s  %s", pr.Repo, prNumber(pr.Number), pr.Title)
+		if m.action.note != nil {
+			if note := m.action.note(pr); note != "" {
+				lines[i] += "  → " + note
+			}
+		}
 	}
 
 	return strings.Join(lines, "\n")

@@ -11,6 +11,7 @@ import (
 	"charm.land/bubbles/v2/table"
 	tea "charm.land/bubbletea/v2"
 	"github.com/hugoh/gh-bulk-pr/internal/github"
+	"github.com/hugoh/gh-bulk-pr/internal/worker"
 )
 
 const (
@@ -34,6 +35,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return msg.applyTo(m), nil
 	case actionDoneMsg:
 		m.results = msg.results
+		m = m.applyOnDone(msg.results)
 		m.screen = screenResults
 		m.pane.GotoTop()
 
@@ -441,7 +443,9 @@ func (m Model) handleListKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		return m.selectAll()
 	case key.Matches(msg, keys.Refresh):
 		return m.reload()
-	case key.Matches(msg, keys.Checks, keys.Open, keys.OpenAll, keys.Tab, keys.Label, keys.Close, keys.Merge):
+	case key.Matches(
+		msg, keys.Checks, keys.Open, keys.OpenAll, keys.Tab, keys.Label, keys.Close, keys.Merge, keys.AutoMerge,
+	):
 		return m.handleCommandKey(msg, openArmed)
 	}
 
@@ -581,6 +585,13 @@ func (m Model) startAction(actionKey string) (Model, tea.Cmd) {
 	}
 
 	m.action = actionsForKey(m.client, actionKey, "")
+	if m.action != nil && m.action.note != nil {
+		note := m.action.note
+		m.action.destructive = slices.ContainsFunc(
+			m.selectedPRs(),
+			func(pr github.PR) bool { return note(pr) != "" },
+		)
+	}
 
 	return m.enterConfirm(), nil
 }
@@ -742,6 +753,27 @@ func (m Model) refreshRows() Model {
 	return m
 }
 
+// applyOnDone runs the action's onDone on the local copy of every PR that
+// succeeded, so the table reflects the change without a reload.
+func (m Model) applyOnDone(results []worker.Result) Model {
+	if m.action == nil || m.action.onDone == nil {
+		return m
+	}
+
+	position := make(map[prKey]int, len(m.prs))
+	for idx, pull := range m.prs {
+		position[keyOf(pull)] = idx
+	}
+
+	for _, res := range results {
+		if idx, ok := position[keyOf(res.PR)]; ok && res.Err == nil {
+			m.action.onDone(&m.prs[idx])
+		}
+	}
+
+	return m.refreshRows()
+}
+
 // rowsFor builds the table rows; for PRs that aren't detailed yet, the checks
 // and merge cells are placeholders because the light search doesn't fetch them.
 func rowsFor(prs []github.PR, selected map[prKey]bool) []table.Row {
@@ -757,6 +789,11 @@ func rowsFor(prs []github.PR, selected map[prKey]bool) []table.Row {
 			checks, merge = checksSummary(entry), mergeLabel(entry.MergeState)
 		}
 
+		auto := ""
+		if entry.AutoMerge {
+			auto = "on"
+		}
+
 		rows[idx] = table.Row{
 			mark,
 			entry.Repo,
@@ -764,6 +801,7 @@ func rowsFor(prs []github.PR, selected map[prKey]bool) []table.Row {
 			entry.Title,
 			checks,
 			merge,
+			auto,
 			entry.Author,
 		}
 	}

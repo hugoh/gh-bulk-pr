@@ -130,6 +130,23 @@ func actionsForKey(client *github.Client, actionKey, input string) *pendingActio
 		return &pendingAction{label: "close", destructive: true, run: client.ClosePR}
 	case "m":
 		return &pendingAction{label: "merge", destructive: true, run: client.MergePR}
+	case "a":
+		return &pendingAction{
+			label: "toggle auto-merge",
+			run:   client.ToggleAutoMerge,
+			onDone: func(pr *github.PR) {
+				if !pr.MergesNow() {
+					pr.AutoMerge = !pr.AutoMerge
+				}
+			},
+			note: func(pr github.PR) string {
+				if pr.MergesNow() {
+					return "merges now"
+				}
+
+				return ""
+			},
+		}
 	}
 
 	return nil
