@@ -124,6 +124,22 @@ func TestViewList_Loading(t *testing.T) {
 	assert.Contains(t, m.View().Content, "loading")
 }
 
+func TestViewList_LoadingShowsTableAndLeftSpinner(t *testing.T) {
+	t.Parallel()
+
+	m := New(nil, "is:open is:pr").handleResize(tea.WindowSizeMsg{Width: 100, Height: 30})
+	lines := strings.Split(ansi.Strip(m.View().Content), "\n")
+
+	assert.Contains(t, lines[0], "gh-bulk-pr")
+	assert.True(
+		t,
+		strings.HasPrefix(strings.TrimLeft(lines[1], " "), ansi.Strip(m.spinner.View())),
+		lines[1],
+	)
+	assert.Contains(t, lines[1], "loading…")
+	assert.Contains(t, lines[2], "Title", "table header visible before any rows arrive")
+}
+
 func TestViewList_Error(t *testing.T) {
 	t.Parallel()
 
@@ -232,14 +248,25 @@ func TestCheckGlyphsAreColored(t *testing.T) {
 func TestColorChecks_KeepsColorAndHighlightOnSelectedRow(t *testing.T) {
 	t.Parallel()
 
-	sel, _, _ := strings.Cut(table.DefaultStyles().Selected.Render("|"), "|")
+	sel, _, _ := strings.Cut(tableStyles().Selected.Render("|"), "|")
 	require.NotEmpty(t, sel)
 
 	got := colorChecks("plain ✓\n" + sel + "row ✗ tail\x1b[0m")
 
 	assert.Contains(t, got, "plain "+okStyle().Render("✓")+"\n")
-	assert.Contains(t, got, errStyle().Render("✗")+sel+" tail")
+	assert.Contains(t, got, onCursor(errStyle()).Render("✗")+sel+" tail")
 	assert.NotContains(t, got, okStyle().Render("✓")+sel)
+}
+
+func TestColorMerge_KeepsHighlightBehindTheCellOnSelectedRow(t *testing.T) {
+	t.Parallel()
+
+	sel, _, _ := strings.Cut(tableStyles().Selected.Render("|"), "|")
+	cols := []table.Column{{Title: "Merge", Width: 8}}
+
+	got := colorMerge("Merge   \n"+sel+" behind \x1b[0m", cols)
+
+	assert.Contains(t, got, onCursor(mergeStyle(labelBehind)).Render(labelBehind)+sel)
 }
 
 func TestMergeLabel(t *testing.T) {
@@ -336,13 +363,13 @@ func TestColorMerge_ColorsOnlyTheMergeColumn(t *testing.T) {
 	got := colorMerge(plain, m.table.Columns())
 	assert.Equal(t, ansi.Strip(plain), ansi.Strip(got), "layout must not shift")
 
-	sel, _, _ := strings.Cut(table.DefaultStyles().Selected.Render("|"), "|")
+	sel, _, _ := strings.Cut(tableStyles().Selected.Render("|"), "|")
 	lines := strings.Split(got, "\n")
 
 	assert.Contains(
 		t,
 		lines[1],
-		mergeStyle("behind").Render("behind")+sel,
+		onCursor(mergeStyle("behind")).Render("behind")+sel,
 		"cursor row keeps highlight",
 	)
 	assert.Contains(t, lines[2], mergeStyle("clean").Render("clean"))
@@ -910,28 +937,28 @@ func TestStylesAdaptToTheBackground(t *testing.T) {
 		// its RGB value rather than the original ANSI256 code.
 		"ok": {
 			func(s string) string { return okStyle().Render(s) },
-			"38;2;0;135;0m",
-			"38;2;0;215;135m",
+			"38;2;26;127;55m",
+			"38;2;63;185;80m",
 		},
 		"error": {
 			func(s string) string { return errStyle().Render(s) },
-			"38;2;215;0;0m",
-			"38;2;255;0;0m",
+			"38;2;209;36;47m",
+			"38;2;248;81;73m",
 		},
 		"help": {
 			func(s string) string { return helpStyle().Render(s) },
-			"38;2;118;118;118m",
-			"38;2;98;98;98m",
+			"38;2;89;99;110m",
+			"38;2;145;152;161m",
 		},
 		"label": {
 			func(s string) string { return previewLabelStyle().Render(s) },
-			"38;2;215;95;0m",
-			"38;2;255;175;0m",
+			"38;2;188;76;0m",
+			"38;2;219;109;40m",
 		},
 		"reviewer": {
 			func(s string) string { return previewReviewerStyle().Render(s) },
-			"38;2;0;95;255m",
-			"38;2;0;175;255m",
+			"38;2;130;80;223m",
+			"38;2;171;125;248m",
 		},
 	}
 
