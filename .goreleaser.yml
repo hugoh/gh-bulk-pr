@@ -30,7 +30,7 @@ builds:
       - -s -w
       - -X main.version={{.Version}}
 archives:
-  - format: binary
+  - formats: [binary]
     name_template: "gh-bulk-pr-{{ .Os }}-{{ .Arch }}"
 changelog:
   use: git

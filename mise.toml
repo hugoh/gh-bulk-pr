@@ -1,6 +1,8 @@
 # DO NOT EDIT — managed by hugoh/go-tools via copier.
+# Go's own version lives in .config/mise/conf.d/go.toml instead — Renovate
+# owns it there directly (see that file's header and copier.yml's
+# _skip_if_exists).
 [tools]
-go = "1.27.0"
 golangci-lint = "2.13.2"
 gotestsum = "1.13.0"
 "go:github.com/vladopajic/go-test-coverage/v2" = "2.19.0"
