@@ -859,15 +859,23 @@ func TestListKey_TabKeepsClosedState(t *testing.T) {
 
 	m := loadedModel()
 	m, _ = m.handleListKeyByString("s")
-	m, _ = m.handleListKeyByString("2")
+	m, _ = m.handleListKeyByString("1")
 
-	assert.Equal(t, 1, m.tab)
+	assert.Equal(t, 0, m.tab)
 	assert.Contains(t, m.query, "is:closed")
 	assert.Contains(t, m.query, "owner:@me")
 }
 
 func TestTabs(t *testing.T) {
 	t.Parallel()
+
+	t.Run("owner is tab 1 and the default", func(t *testing.T) {
+		t.Parallel()
+
+		assert.Equal(t, []string{"owner:@me", "involves:@me"}, TabNames())
+		assert.Equal(t, DefaultQuery, tabs()[0].query)
+		assert.Equal(t, 0, New(nil, DefaultQuery).tab)
+	})
 
 	t.Run("starting on a tab query selects it", func(t *testing.T) {
 		t.Parallel()
@@ -890,13 +898,13 @@ func TestTabs(t *testing.T) {
 
 		m, cmd := m.handleListKeyByString("2")
 		assert.Equal(t, 1, m.tab)
-		assert.Equal(t, "is:open is:pr archived:false sort:updated-desc owner:@me", m.query)
+		assert.Equal(t, "is:open is:pr archived:false sort:updated-desc involves:@me", m.query)
 		assert.True(t, m.loading)
 		require.NotNil(t, cmd)
 
 		m, _ = m.handleListKeyByString("1")
 		assert.Equal(t, 0, m.tab)
-		assert.Equal(t, "is:open is:pr archived:false sort:updated-desc involves:@me", m.query)
+		assert.Equal(t, "is:open is:pr archived:false sort:updated-desc owner:@me", m.query)
 	})
 
 	t.Run("/ edits the full current query", func(t *testing.T) {
@@ -925,7 +933,7 @@ func TestTabs(t *testing.T) {
 
 		m := loadedModel()
 		m.screen = screenFilter
-		m.filterInput.SetValue("is:open  is:pr archived:false sort:updated-desc owner:@me")
+		m.filterInput.SetValue("is:open  is:pr archived:false sort:updated-desc involves:@me")
 
 		m, _ = m.handleFilterKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 		assert.Equal(t, 1, m.tab)
@@ -959,7 +967,7 @@ func TestQueryChangesAreRecorded(t *testing.T) {
 		assert.Nil(t, batch[0](), "recording a query produces no message")
 	}
 
-	record(tabs()[1].query)
+	record(tabs()[0].query)
 	record("is:open is:pr author:hugoh")
 
 	got, err := os.ReadFile(path) //nolint:gosec // test reads its own temp file
