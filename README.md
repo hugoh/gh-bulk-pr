@@ -15,45 +15,53 @@ gh bulk-pr
 gh bulk-pr --query "is:open is:pr author:@me archived:false"
 ```
 
-| Flag        | Default                                       | Description                       |
-| ----------- | --------------------------------------------- | --------------------------------- |
-| `--query`   | `is:open is:pr archived:false sort:updated-desc involves:@me`   | GitHub search query for the list  |
-| `--mouse`   | off                                           | Scroll with the mouse wheel (hold shift to select text) |
-| `--version` |                                               | Print version and exit            |
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--mouse` | `false` | scroll with the mouse wheel (the terminal then needs shift to select text) |
+| `--query` | `is:open is:pr archived:false sort:updated-desc involves:@me` | GitHub search query for the PR list |
+| `--version` | `false` | print version and exit |
 
 ## Keys
 
 Press `?` in the app for this list.
 
-| Key                       | Action                                         |
-| ------------------------- | ---------------------------------------------- |
-| `↑`/`↓`, `j`/`k`          | Move                                           |
-| `g`/`home`, `G`/`end`     | Jump to the first / last loaded row            |
-| `pgup`/`b`, `pgdn`/`f`    | Page up / down                                 |
-| `x` / `space`             | Toggle selection                               |
-| `ctrl+a`                  | Select all loaded rows                         |
-| `1` / `2`                 | Switch tab: `involves:@me` / `owner:@me`       |
-| `/`                       | Edit the full search query                     |
-| `enter` / `p`             | Toggle preview                                 |
-| `o`                       | Open the PR under the cursor in the browser    |
-| `O`                       | Open all selected PRs (asks above 5, max 20)   |
-| `T`                       | Open the PR in `gh enhance` (checks)           |
-| `l`                       | Add label to selected PRs                      |
-| `c`                       | Close selected PRs                             |
-| `m`                       | Merge selected PRs                             |
-| `r`                       | Refresh the PR list                            |
-| `esc`                     | Close preview, then clear selection            |
-| `?`                       | Show all keys                                  |
-| `q`                       | Quit (press twice when PRs are selected)       |
-| `ctrl+c`                  | Quit at once, from any screen                  |
+| Key | Action |
+| --- | --- |
+| `↑/k` | up |
+| `↓/j` | down |
+| `g/home` | top |
+| `G/end` | bottom |
+| `pgup/b` | page up |
+| `pgdn/f` | page down |
+| `x/space` | select |
+| `ctrl+a` | select all |
+| `esc` | close/clear |
+| `enter/p` | preview |
+| `/` | filter |
+| `s` | open/closed |
+| `1/2` | tab |
+| `r` | refresh |
+| `T` | checks |
+| `o` | open |
+| `O` | open all |
+| `l` | label |
+| `c` | close |
+| `m` | merge |
+| `a` | auto |
+| `?` | help |
+| `q` | quit |
 
-Both tabs share the base query `is:open is:pr archived:false sort:updated-desc`. Editing the query with `/` deselects the tab unless it still matches one.
+`a` toggles squash auto-merge on each selected PR: it enables it where it is off and disables it where it is on. PRs with auto-merge enabled show `on` in the Auto column. A PR that is already ready to merge has nothing to wait for (GitHub refuses auto-merge on it), so `a` squash-merges it right away; the confirm screen marks those PRs `merges now` and needs an explicit `y`. Repos with auto-merge turned off fail for the PRs that need it.
+
+`ctrl+c` quits at once from any screen; `q` needs a second press while PRs are selected. `O` asks for confirmation above 5 PRs and opens at most 20.
+
+Tabs (`1`/`2`): `involves:@me`, `owner:@me`. All share the base query `is:open is:pr archived:false sort:updated-desc`. Editing the query with `/` deselects the tab unless it still matches one.
 
 Queries run from the filter bar or a tab are appended to `$XDG_STATE_HOME/gh-bulk-pr/history` (`~/.local/state/gh-bulk-pr/history`). Press `↑`/`↓` in the search field to recall them.
 
 Results load 50 at a time: the next page is fetched as you scroll near the bottom, and the header shows how many are loaded (`50 of 312`). GitHub search returns at most 1000 results, so narrow the query (`updated:>2026-01-01`, `repo:`, `author:`) for anything bigger. `ctrl+a` selects the loaded rows only, and the footer shows `N selected of M`. `r` reloads from the first page.
 
-Every action asks for confirmation before running. Close and merge need an explicit `y`; labelling also accepts `enter`. `n` or `esc` cancels. The confirm and results lists scroll (`j`/`k`, `g`/`G`, page keys), and failed PRs are listed first in the results. The app needs a terminal of at least 91 columns by 11 rows.
+Every action asks for confirmation before running. Close and merge need an explicit `y`; labelling also accepts `enter`. `n` or `esc` cancels. The confirm and results lists scroll (`j`/`k`, `g`/`G`, page keys), and failed PRs are listed first in the results. The app needs a terminal of at least 97 columns by 11 rows.
 
 ## Development
 

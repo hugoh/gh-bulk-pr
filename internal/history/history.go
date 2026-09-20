@@ -17,8 +17,7 @@ const (
 	filePerm = 0o600
 )
 
-// Log appends queries to a file, one per line. A nil *Log discards everything.
-// It is safe for concurrent use.
+// Log appends queries to a file, one per line. It is safe for concurrent use.
 type Log struct {
 	path string
 
@@ -45,10 +44,6 @@ func DefaultPath() string {
 // Add appends query unless it repeats the previous entry.
 // ponytail: unbounded append-only file, truncate on load if it ever gets big.
 func (l *Log) Add(query string) error {
-	if l == nil {
-		return nil
-	}
-
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -78,10 +73,6 @@ func (l *Log) Add(query string) error {
 // Load returns the logged queries, oldest first, each one once at its most
 // recent use. A missing or unreadable file is an empty history.
 func (l *Log) Load() []string {
-	if l == nil {
-		return nil
-	}
-
 	data, err := os.ReadFile(l.path)
 	if err != nil {
 		return nil

@@ -27,7 +27,7 @@ func TestPrNumber(t *testing.T) {
 	assert.Equal(t, "#0", prNumber(0))
 }
 
-func TestChecksSummary(t *testing.T) {
+func TestChecksDisplay(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]struct {
@@ -43,7 +43,8 @@ func TestChecksSummary(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, tt.want, checksSummary(tt.pr))
+			glyph, _, _ := checksDisplay(tt.pr)
+			assert.Equal(t, tt.want, glyph)
 		})
 	}
 }
@@ -95,6 +96,8 @@ func TestPreviewText(t *testing.T) {
 	}
 
 	got := previewText(pr)
+	assert.NotContains(t, got, "auto-merge")
+	assert.Contains(t, ansi.Strip(previewText(github.PR{AutoMerge: true})), "auto-merge")
 	assert.Contains(t, got, "merge: behind")
 	assert.Contains(t, got, prTitleFix)
 	assert.Contains(t, got, testRepoA)
@@ -273,16 +276,16 @@ func TestMergeLabel(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]string{
-		mergeClean:  "clean",
-		mergeBehind: "behind",
-		mergeDirty:  labelConflict,
-		"BLOCKED":   "blocked",
-		"UNSTABLE":  "unstable",
-		"DRAFT":     "draft",
-		"HAS_HOOKS": "hooks",
-		"UNKNOWN":   "unknown",
-		"":          "-",
-		"NEW_STATE": "-",
+		github.MergeClean: "clean",
+		mergeBehind:       "behind",
+		mergeDirty:        labelConflict,
+		"BLOCKED":         "blocked",
+		"UNSTABLE":        "unstable",
+		"DRAFT":           "draft",
+		"HAS_HOOKS":       "hooks",
+		"UNKNOWN":         "unknown",
+		"":                "-",
+		"NEW_STATE":       "-",
 	}
 
 	for state, want := range tests {
@@ -298,7 +301,7 @@ func TestMergeSummary(t *testing.T) {
 	t.Parallel()
 
 	prs := []github.PR{
-		{MergeState: mergeClean},
+		{MergeState: github.MergeClean},
 		{MergeState: mergeBehind},
 		{MergeState: mergeDirty},
 		{MergeState: mergeBehind},
@@ -306,7 +309,7 @@ func TestMergeSummary(t *testing.T) {
 	}
 
 	assert.Equal(t, "2 behind · 1 conflict", mergeSummary(prs))
-	assert.Empty(t, mergeSummary([]github.PR{{MergeState: mergeClean}}))
+	assert.Empty(t, mergeSummary([]github.PR{{MergeState: github.MergeClean}}))
 	assert.Empty(t, mergeSummary(nil))
 }
 
@@ -324,40 +327,42 @@ func TestMergeStyle(t *testing.T) {
 	assert.Equal(t, previewLabelStyle().GetForeground(), mergeStyle("behind").GetForeground())
 	assert.Equal(t, errStyle().GetForeground(), mergeStyle("conflict").GetForeground())
 	assert.Equal(t, errStyle().GetForeground(), mergeStyle("blocked").GetForeground())
-	assert.Equal(t, previewMetaStyle().GetForeground(), mergeStyle("draft").GetForeground())
-	assert.Equal(t, previewMetaStyle().GetForeground(), mergeStyle("-").GetForeground())
+	assert.Equal(t, helpStyle().GetForeground(), mergeStyle("draft").GetForeground())
+	assert.Equal(t, helpStyle().GetForeground(), mergeStyle("-").GetForeground())
 }
 
 func TestColorMerge_ColorsOnlyTheMergeColumn(t *testing.T) {
 	t.Parallel()
 
 	m := New(nil, "q").handleResize(tea.WindowSizeMsg{Width: 100, Height: 30})
-	m = m.handleSearchDone(searchDoneMsg{prs: []github.PR{
-		{
-			Number:     1,
-			Title:      "fix",
-			Repo:       testRepoA,
-			Author:     testAuthor,
-			MergeState: mergeBehind,
-			Detailed:   true,
+	m = m.handleSearchDone(searchDoneMsg{
+		PRs: []github.PR{
+			{
+				Number:     1,
+				Title:      "fix",
+				Repo:       testRepoA,
+				Author:     testAuthor,
+				MergeState: mergeBehind,
+				Detailed:   true,
+			},
+			{
+				Number:     2,
+				Title:      "clean up behind",
+				Repo:       testRepoB,
+				Author:     testAuthor,
+				MergeState: github.MergeClean,
+				Detailed:   true,
+			},
+			{
+				Number:     3,
+				Title:      "other",
+				Repo:       "hugoh/c",
+				Author:     testAuthor,
+				MergeState: mergeDirty,
+				Detailed:   true,
+			},
 		},
-		{
-			Number:     2,
-			Title:      "clean up behind",
-			Repo:       testRepoB,
-			Author:     testAuthor,
-			MergeState: mergeClean,
-			Detailed:   true,
-		},
-		{
-			Number:     3,
-			Title:      "other",
-			Repo:       "hugoh/c",
-			Author:     testAuthor,
-			MergeState: mergeDirty,
-			Detailed:   true,
-		},
-	}})
+	})
 
 	plain := m.table.View()
 	got := colorMerge(plain, m.table.Columns())
@@ -453,7 +458,7 @@ func TestViewList_EmptyResultKeepsSpacerLine(t *testing.T) {
 	t.Parallel()
 
 	m := New(nil, "q").handleResize(tea.WindowSizeMsg{Width: 100, Height: 30})
-	m = m.handleSearchDone(searchDoneMsg{prs: nil})
+	m = m.handleSearchDone(searchDoneMsg{PRs: nil})
 
 	lines := strings.Split(m.View().Content, "\n")
 
@@ -490,7 +495,7 @@ func TestViewList_NoPositionWithoutRows(t *testing.T) {
 	t.Parallel()
 
 	m := loadedModel()
-	m = m.handleSearchDone(searchDoneMsg{prs: nil})
+	m = m.handleSearchDone(searchDoneMsg{PRs: nil})
 
 	assert.NotContains(t, m.statusLine(), " of ")
 }
@@ -1040,4 +1045,13 @@ func TestViewList_LoadingMoreIndicatorStaysAboveThePreview(t *testing.T) {
 	view := m.View().Content
 
 	assert.Less(t, strings.Index(view, "loading more…"), strings.Index(view, "───"))
+}
+
+func TestViewList_HeaderSeparatesTabsFromQuery(t *testing.T) {
+	t.Parallel()
+
+	m := New(nil, tabs()[0].query).handleResize(tea.WindowSizeMsg{Width: 200, Height: 30})
+	header, _, _ := strings.Cut(ansi.Strip(m.View().Content), "\n")
+
+	assert.Contains(t, header, tabs()[1].name+" │ "+tabs()[0].query)
 }

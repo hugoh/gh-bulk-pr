@@ -40,14 +40,6 @@ func TestLog_Add(t *testing.T) {
 	assert.Equal(t, "is:open a\nis:open b\nis:open a\n", string(got))
 }
 
-func TestLog_NilIsNoop(t *testing.T) {
-	t.Parallel()
-
-	var log *Log
-
-	assert.NoError(t, log.Add("q"))
-}
-
 func TestLog_Load(t *testing.T) {
 	t.Parallel()
 
@@ -66,10 +58,6 @@ func TestLog_Load(t *testing.T) {
 		log.Load(),
 		"oldest first, each query once at its latest use",
 	)
-
-	var nilLog *Log
-
-	assert.Empty(t, nilLog.Load())
 }
 
 func TestLog_ConcurrentAdd(t *testing.T) {

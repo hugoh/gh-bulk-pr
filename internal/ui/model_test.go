@@ -30,8 +30,9 @@ func TestColumnsForWidth(t *testing.T) {
 			t.Parallel()
 
 			cols := columnsForWidth(tt.width)
-			require.Len(t, cols, 7)
+			require.Len(t, cols, 8)
 			assert.Equal(t, "Merge", cols[5].Title)
+			assert.Equal(t, "Auto", cols[6].Title)
 
 			titleCol := cols[3]
 			assert.Equal(t, "Title", titleCol.Title)

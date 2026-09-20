@@ -33,7 +33,6 @@ func headerStyle() lipgloss.Style          { return fg(colorAccent()).Bold(true)
 func separatorStyle() lipgloss.Style       { return fg(colorOverlay()) }
 func footerStyle() lipgloss.Style          { return helpStyle().Padding(0, 1) }
 func previewTitleStyle() lipgloss.Style    { return lipgloss.NewStyle().Bold(true) }
-func previewMetaStyle() lipgloss.Style     { return helpStyle() }
 func previewLabelStyle() lipgloss.Style    { return fg(colorWarn()) }
 func previewReviewerStyle() lipgloss.Style { return fg(colorInfo()) }
 

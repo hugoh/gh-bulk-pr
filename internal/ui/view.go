@@ -17,7 +17,6 @@ import (
 
 const (
 	previewBodyLimit = 500
-	mergeClean       = "CLEAN"
 	mergeBehind      = "BEHIND"
 	mergeDirty       = "DIRTY"
 	labelBehind      = "behind"
@@ -34,37 +33,33 @@ func checksDisplay(pr github.PR) (string, string, lipgloss.Style) {
 	case github.ChecksPass:
 		return "✓", "passing", okStyle()
 	default:
-		return "-", "no checks", previewMetaStyle()
+		return "-", "no checks", helpStyle()
 	}
 }
 
-func checksSummary(pr github.PR) string {
-	glyph, _, _ := checksDisplay(pr)
-
-	return glyph
+// mergeStates maps GitHub's mergeStateStatus to the label shown, ordered as
+// mergeSummary lists them.
+func mergeStates() []struct{ state, label string } {
+	return []struct{ state, label string }{
+		{github.MergeClean, "clean"},
+		{mergeBehind, labelBehind},
+		{mergeDirty, labelConflict},
+		{"BLOCKED", labelBlocked},
+		{"UNSTABLE", "unstable"},
+		{"DRAFT", "draft"},
+		{"HAS_HOOKS", "hooks"},
+		{"UNKNOWN", "unknown"},
+	}
 }
 
 func mergeLabel(state string) string {
-	switch state {
-	case mergeClean:
-		return "clean"
-	case mergeBehind:
-		return labelBehind
-	case mergeDirty:
-		return labelConflict
-	case "BLOCKED":
-		return labelBlocked
-	case "UNSTABLE":
-		return "unstable"
-	case "DRAFT":
-		return "draft"
-	case "HAS_HOOKS":
-		return "hooks"
-	case "UNKNOWN":
-		return "unknown"
-	default:
-		return "-"
+	for _, known := range mergeStates() {
+		if known.state == state {
+			return known.label
+		}
 	}
+
+	return "-"
 }
 
 // mergeSummary counts PRs per non-clean merge state, e.g. "2 behind · 1 conflict".
@@ -76,9 +71,9 @@ func mergeSummary(prs []github.PR) string {
 
 	var parts []string
 
-	for _, label := range []string{labelBehind, labelConflict, labelBlocked, "unstable", "draft", "hooks", "unknown"} {
-		if n := counts[label]; n > 0 {
-			parts = append(parts, fmt.Sprintf("%d %s", n, label))
+	for _, known := range mergeStates()[1:] {
+		if n := counts[known.label]; n > 0 {
+			parts = append(parts, fmt.Sprintf("%d %s", n, known.label))
 		}
 	}
 
@@ -108,7 +103,7 @@ func mergeStyle(label string) lipgloss.Style {
 	case labelConflict, labelBlocked:
 		return errStyle()
 	default:
-		return previewMetaStyle()
+		return helpStyle()
 	}
 }
 
@@ -257,7 +252,7 @@ func (m Model) render() string {
 // key hints, or the prompt being typed into.
 func (m Model) viewList(footer string) string {
 	header := headerStyle().Render("gh-bulk-pr") +
-		"  " + m.tabBar() + "  " + helpStyle().Render(m.query)
+		"  " + m.tabBar() + separatorStyle().Render("│") + " " + helpStyle().Render(m.query)
 
 	var body string
 
@@ -365,6 +360,10 @@ func (m Model) statusLine() string {
 		parts = append(parts, errStyle().Render("load more failed: "+m.moreErr.Error()))
 	}
 
+	if m.detailErr != nil {
+		parts = append(parts, errStyle().Render("load details failed: "+m.detailErr.Error()))
+	}
+
 	if m.notice != "" {
 		parts = append(parts, errStyle().Render(m.notice))
 	}
@@ -470,8 +469,13 @@ func previewChecks(item github.PR) string {
 
 func previewMerge(item github.PR) string {
 	label := mergeLabel(item.MergeState)
+	text := "merge: " + label
 
-	return mergeStyle(label).Render("merge: " + label)
+	if item.AutoMerge {
+		text += " · auto-merge"
+	}
+
+	return mergeStyle(label).Render(text)
 }
 
 func previewText(item github.PR) string {
@@ -480,7 +484,7 @@ func previewText(item github.PR) string {
 	fmt.Fprintf(
 		&buf,
 		"%s · %s · %s\n\n",
-		previewMetaStyle().Render(item.Repo+" "+prNumber(item.Number)+" · "+item.Author),
+		helpStyle().Render(item.Repo+" "+prNumber(item.Number)+" · "+item.Author),
 		previewChecks(item),
 		previewMerge(item),
 	)
@@ -489,7 +493,7 @@ func previewText(item github.PR) string {
 		fmt.Fprintf(
 			&buf,
 			"%s %s\n",
-			previewMetaStyle().Render("labels:"),
+			helpStyle().Render("labels:"),
 			previewLabelStyle().Render(strings.Join(item.Labels, ", ")),
 		)
 	}
@@ -498,7 +502,7 @@ func previewText(item github.PR) string {
 		fmt.Fprintf(
 			&buf,
 			"%s %s\n",
-			previewMetaStyle().Render("reviewers:"),
+			helpStyle().Render("reviewers:"),
 			previewReviewerStyle().Render(strings.Join(item.Reviewers, ", ")),
 		)
 	}
@@ -545,6 +549,11 @@ func (m Model) confirmBody() string {
 	lines := make([]string, len(m.confirm))
 	for i, pr := range m.confirm {
 		lines[i] = fmt.Sprintf("  %s %s  %s", pr.Repo, prNumber(pr.Number), pr.Title)
+		if m.action.note != nil {
+			if note := m.action.note(pr); note != "" {
+				lines[i] += "  → " + note
+			}
+		}
 	}
 
 	return strings.Join(lines, "\n")

@@ -11,6 +11,7 @@ import (
 	"charm.land/bubbles/v2/table"
 	tea "charm.land/bubbletea/v2"
 	"github.com/hugoh/gh-bulk-pr/internal/github"
+	"github.com/hugoh/gh-bulk-pr/internal/worker"
 )
 
 const (
@@ -29,29 +30,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		return m.handleResize(msg), nil
 	case searchDoneMsg:
-		return m.handleSearchDone(msg), nil
+		return m.handleSearchDone(msg).fetchDetails()
+	case detailsDoneMsg:
+		return m.handleDetailsDone(msg)
 	case modelMsg:
 		return msg.applyTo(m), nil
 	case actionDoneMsg:
-		m.results = msg.results
-		m.screen = screenResults
-		m.pane.GotoTop()
-
-		return m, nil
+		return m.handleActionDone(msg), nil
 
 	case actionProgressMsg:
 		return m.handleActionProgress()
 
 	case spinner.TickMsg:
-		if !m.spinnerActive() {
-			return m, nil
-		}
-
-		var cmd tea.Cmd
-
-		m.spinner, cmd = m.spinner.Update(msg)
-
-		return m, cmd
+		return m.handleSpinnerTick(msg)
 
 	case tea.MouseWheelMsg:
 		return m.handleMouse(msg)
@@ -61,6 +52,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+func (m Model) handleSpinnerTick(msg spinner.TickMsg) (Model, tea.Cmd) {
+	if !m.spinnerActive() {
+		return m, nil
+	}
+
+	var cmd tea.Cmd
+
+	m.spinner, cmd = m.spinner.Update(msg)
+
+	return m, cmd
+}
+
+func (m Model) handleActionDone(msg actionDoneMsg) Model {
+	m.results = msg.results
+	m = m.applyOnDone(msg.results)
+	m.screen = screenResults
+	m.pane.GotoTop()
+
+	return m
 }
 
 // modelMsg is a message that only updates the model, with no command to run.
@@ -130,7 +142,7 @@ func (m Model) handleMouse(msg tea.MouseWheelMsg) (Model, tea.Cmd) {
 		m.table.MoveDown(delta)
 	}
 
-	return m.maybeLoadMore()
+	return m.followCursor()
 }
 
 func (m Model) spinnerActive() bool {
@@ -194,10 +206,7 @@ func (m Model) handleSearchDone(msg searchDoneMsg) Model {
 		return m
 	}
 
-	switch {
-	case msg.light:
-		return m.handleLightDone(msg)
-	case msg.more:
+	if msg.more {
 		return m.handleMoreDone(msg)
 	}
 
@@ -205,34 +214,14 @@ func (m Model) handleSearchDone(msg searchDoneMsg) Model {
 	m.err = msg.err
 
 	if msg.err == nil {
-		m.prs = msg.prs
+		m.prs = msg.PRs
+		m = m.withStoredDetails()
 		m.selected = survivingSelection(m.selected, m.prs)
 		m = m.storePaging(msg)
 		m = m.refreshRows()
 	}
 
 	return m
-}
-
-// handleLightDone merges the first-pass rows into the list; it never
-// replaces detailed rows, and its errors are left for the full search to report.
-func (m Model) handleLightDone(msg searchDoneMsg) Model {
-	pending := m.loading
-	if msg.more {
-		pending = m.loadingMore
-	}
-
-	// Once the full result for this page has landed the light one has nothing
-	// to add, and any row it would append that the full page lacks (a PR
-	// updated in between) would stay a placeholder.
-	if msg.err != nil || !pending {
-		return m
-	}
-
-	m.total = msg.total
-	m.prs = mergePRs(m.prs, msg.prs)
-
-	return m.refreshRows()
 }
 
 func (m Model) handleMoreDone(msg searchDoneMsg) Model {
@@ -243,19 +232,16 @@ func (m Model) handleMoreDone(msg searchDoneMsg) Model {
 		m.cancelMore = nil
 	}
 
-	// Rows still lacking details belong to this page's light result. Whatever
-	// the full result didn't confirm (or all of them, if it failed) goes; a
-	// retry fetches the page again.
-	if msg.err == nil {
-		m.moreErr = nil
-		m.prs = mergePRs(m.prs, msg.prs)
-		m = m.storePaging(msg)
-	} else {
+	if msg.err != nil {
 		m.moreErr = msg.err
+
+		return m
 	}
 
-	m.prs = slices.DeleteFunc(m.prs, func(pr github.PR) bool { return !pr.Detailed })
-	m.selected = survivingSelection(m.selected, m.prs)
+	m.moreErr = nil
+	m.prs = appendNew(m.prs, msg.PRs)
+	m = m.withStoredDetails()
+	m = m.storePaging(msg)
 
 	return m.refreshRows()
 }
@@ -263,41 +249,15 @@ func (m Model) handleMoreDone(msg searchDoneMsg) Model {
 // storePaging records where the next page starts and caches everything
 // loaded so far for the current query.
 func (m Model) storePaging(msg searchDoneMsg) Model {
-	m.total, m.endCursor, m.hasMore = msg.total, msg.cursor, msg.hasNext
-	m.cache[msg.query] = results{
-		prs:     m.prs,
-		total:   m.total,
-		cursor:  m.endCursor,
-		hasMore: m.hasMore,
+	m.total, m.endCursor, m.hasMore = msg.Total, msg.EndCursor, msg.HasNext
+	m.cache[msg.query] = github.Page{
+		PRs:       m.prs,
+		Total:     m.total,
+		EndCursor: m.endCursor,
+		HasNext:   m.hasMore,
 	}
 
 	return m
-}
-
-// mergePRs adds incoming to prs by identity: new PRs are appended, known ones
-// updated in place, except that a light row never replaces a detailed one.
-// prs is not modified; it may be shared with the cache.
-func mergePRs(prs, incoming []github.PR) []github.PR {
-	merged := slices.Clone(prs)
-	index := make(map[prKey]int, len(merged))
-
-	for pos, existing := range merged {
-		index[keyOf(existing)] = pos
-	}
-
-	for _, fresh := range incoming {
-		pos, known := index[keyOf(fresh)]
-
-		switch {
-		case !known:
-			index[keyOf(fresh)] = len(merged)
-			merged = append(merged, fresh)
-		case fresh.Detailed || !merged[pos].Detailed:
-			merged[pos] = fresh
-		}
-	}
-
-	return merged
 }
 
 // maybeLoadMore fetches the next page once the cursor is within
@@ -360,7 +320,7 @@ func (m Model) handleResultsKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 
 	if msg.String() == keyEnter || msg.String() == keyEsc {
 		m.screen = screenList
-		m = m.withResults(results{})
+		m = m.withResults(github.Page{})
 		m.selected = map[prKey]bool{}
 		delete(m.cache, m.query)
 		m = m.refreshRows()
@@ -385,6 +345,10 @@ func (m Model) reload() (Model, tea.Cmd) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	m.cancel = cancel
+	m.detailCtx = ctx
+	m.fetched = map[string]fetchState{}
+	m.fetching = 0
+	m.detailErr = nil
 	m.searchID++
 	m.loading = true
 	m.loadingMore = false
@@ -394,10 +358,10 @@ func (m Model) reload() (Model, tea.Cmd) {
 	return m, m.searchCmds(ctx)
 }
 
-func (m Model) withResults(res results) Model {
-	m.prs, m.total, m.endCursor, m.hasMore = res.prs, res.total, res.cursor, res.hasMore
+func (m Model) withResults(page github.Page) Model {
+	m.prs, m.total, m.endCursor, m.hasMore = page.PRs, page.Total, page.EndCursor, page.HasNext
 
-	return m
+	return m.withStoredDetails()
 }
 
 // runQuery makes query current, selecting the tab it matches (if any),
@@ -441,16 +405,19 @@ func (m Model) handleListKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		return m.selectAll()
 	case key.Matches(msg, keys.Refresh):
 		return m.reload()
-	case key.Matches(msg, keys.Checks, keys.Open, keys.OpenAll, keys.Tab, keys.Label, keys.Close, keys.Merge):
+	case key.Matches(
+		msg, keys.Checks, keys.Open, keys.OpenAll, keys.State, keys.Tab,
+		keys.Label, keys.Close, keys.Merge, keys.AutoMerge,
+	):
 		return m.handleCommandKey(msg, openArmed)
 	}
 
 	var cmd tea.Cmd
 
 	m.table, cmd = m.table.Update(msg)
-	m, more := m.maybeLoadMore()
+	m, follow := m.followCursor()
 
-	return m, tea.Batch(cmd, more)
+	return m, tea.Batch(cmd, follow)
 }
 
 // requestQuit quits at once, unless PRs are selected: then the first q asks
@@ -510,11 +477,36 @@ func (m Model) handleCommandKey(msg tea.KeyPressMsg, openArmed bool) (Model, tea
 		return m, m.openFocused()
 	case key.Matches(msg, m.keys.OpenAll):
 		return m.openSelected(openArmed)
+	case key.Matches(msg, m.keys.State):
+		return m.toggleState()
 	case key.Matches(msg, m.keys.Tab):
-		return m.runQuery(tabs()[int(pressed[0]-'1')].query)
+		return m.runQuery(m.tabQuery(int(pressed[0] - '1')))
 	default:
 		return m.startAction(pressed)
 	}
+}
+
+// toggleState flips the current query between is:open and is:closed.
+func (m Model) toggleState() (Model, tea.Cmd) {
+	query, ok := flipState(m.query)
+	if !ok {
+		m.notice = "the query has no " + stateOpen + " or " + stateClosed + " to toggle"
+
+		return m, nil
+	}
+
+	return m.runQuery(query)
+}
+
+// tabQuery is tab idx's query, closed if the current query is, so switching
+// tabs doesn't silently go back to open PRs.
+func (m Model) tabQuery(idx int) string {
+	query := tabs()[idx].query
+	if isClosed(m.query) {
+		query, _ = flipState(query)
+	}
+
+	return query
 }
 
 func (m Model) startFilter() (Model, tea.Cmd) {
@@ -571,7 +563,7 @@ func (m Model) startAction(actionKey string) (Model, tea.Cmd) {
 		return m, nil
 	}
 
-	if needsInput(actionKey) {
+	if actionKey == "l" {
 		m.actionKey = actionKey
 		m.screen = screenActionInput
 		m.actionInput.SetValue("")
@@ -581,6 +573,13 @@ func (m Model) startAction(actionKey string) (Model, tea.Cmd) {
 	}
 
 	m.action = actionsForKey(m.client, actionKey, "")
+	if m.action != nil && m.action.note != nil {
+		note := m.action.note
+		m.action.destructive = slices.ContainsFunc(
+			m.selectedPRs(),
+			func(pr github.PR) bool { return note(pr) != "" },
+		)
+	}
 
 	return m.enterConfirm(), nil
 }
@@ -742,6 +741,27 @@ func (m Model) refreshRows() Model {
 	return m
 }
 
+// applyOnDone runs the action's onDone on the local copy of every PR that
+// succeeded, so the table reflects the change without a reload.
+func (m Model) applyOnDone(results []worker.Result) Model {
+	if m.action == nil || m.action.onDone == nil {
+		return m
+	}
+
+	position := make(map[prKey]int, len(m.prs))
+	for idx, pull := range m.prs {
+		position[keyOf(pull)] = idx
+	}
+
+	for _, res := range results {
+		if idx, ok := position[keyOf(res.PR)]; ok && res.Err == nil {
+			m.action.onDone(&m.prs[idx])
+		}
+	}
+
+	return m.refreshRows()
+}
+
 // rowsFor builds the table rows; for PRs that aren't detailed yet, the checks
 // and merge cells are placeholders because the light search doesn't fetch them.
 func rowsFor(prs []github.PR, selected map[prKey]bool) []table.Row {
@@ -754,7 +774,13 @@ func rowsFor(prs []github.PR, selected map[prKey]bool) []table.Row {
 
 		checks, merge := pendingCell, pendingCell
 		if entry.Detailed {
-			checks, merge = checksSummary(entry), mergeLabel(entry.MergeState)
+			checks, _, _ = checksDisplay(entry)
+			merge = mergeLabel(entry.MergeState)
+		}
+
+		auto := ""
+		if entry.AutoMerge {
+			auto = "on"
 		}
 
 		rows[idx] = table.Row{
@@ -764,6 +790,7 @@ func rowsFor(prs []github.PR, selected map[prKey]bool) []table.Row {
 			entry.Title,
 			checks,
 			merge,
+			auto,
 			entry.Author,
 		}
 	}

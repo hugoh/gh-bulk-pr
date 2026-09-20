@@ -23,14 +23,6 @@ import (
 // the next page is fetched.
 const loadMoreMargin = 10
 
-// results is a fully loaded search: the rows plus what's needed to fetch more.
-type results struct {
-	prs     []github.PR
-	total   int
-	cursor  string
-	hasMore bool
-}
-
 type screen int
 
 const (
@@ -46,6 +38,8 @@ type pendingAction struct {
 	label       string // human-readable name for the confirm/results screens
 	destructive bool   // hard to undo: only an explicit "y" confirms it, never enter
 	run         func(ctx context.Context, pr github.PR) error
+	onDone      func(pr *github.PR)       // optional: brings a succeeded PR's local copy up to date
+	note        func(pr github.PR) string // optional: what this action does to pr, when it isn't obvious
 }
 
 // Model is the bubbletea model driving the PR list, preview panel, filter
@@ -66,9 +60,9 @@ type Model struct {
 	filterInput textinput.Model
 	actionInput textinput.Model
 	prs         []github.PR
-	cache       map[string]results // last full result per query
-	total       int                // every match GitHub reports, loaded or not
-	endCursor   string             // where the next page starts
+	cache       map[string]github.Page // last full result per query
+	total       int                    // every match GitHub reports, loaded or not
+	endCursor   string                 // where the next page starts
 	hasMore     bool
 	selected    map[prKey]bool
 
@@ -86,6 +80,12 @@ type Model struct {
 
 	searchID int // identifies the latest search; older results are dropped
 	cancel   context.CancelFunc
+
+	details   map[string]github.Detail // last known details by PR ID; kept across refreshes
+	fetched   map[string]fetchState    // per PR ID, for the current search only
+	fetching  int                      // details requests in flight
+	detailCtx context.Context          //nolint:containedctx // ends with the search, like cancel
+	detailErr error                    // last failure loading details; the rows stay usable
 
 	cancelMore context.CancelFunc // stops the further page being fetched, if any
 
@@ -110,11 +110,12 @@ const (
 	colTitleMin = 20
 	colChecks   = 8
 	colMerge    = 8
+	colAuto     = 4
 	colAuthor   = 12
-	numCols     = 7
+	numCols     = 8
 	cellPadding = 2 // bubbles/table's default Cell style: Padding(0, 1), left+right
 
-	fixedColsSum       = colSelect + colRepo + colNumber + colChecks + colMerge + colAuthor
+	fixedColsSum       = colSelect + colRepo + colNumber + colChecks + colMerge + colAuto + colAuthor
 	tableOverhead      = numCols * cellPadding
 	defaultTableHeight = 20
 )
@@ -133,6 +134,7 @@ func columnsForWidth(width int) []table.Column {
 		{Title: "Title", Width: titleWidth},
 		{Title: "Checks", Width: colChecks},
 		{Title: "Merge", Width: colMerge},
+		{Title: "Auto", Width: colAuto},
 		{Title: "Author", Width: colAuthor},
 	}
 }
@@ -173,7 +175,10 @@ func New(client *github.Client, query string) Model {
 		actionInput: actionTI,
 		pane:        viewport.New(),
 		selected:    map[prKey]bool{},
-		cache:       map[string]results{},
+		cache:       map[string]github.Page{},
+		details:     map[string]github.Detail{},
+		fetched:     map[string]fetchState{},
+		detailCtx:   context.Background(),
 		loading:     true,
 		spinner:     spin,
 		progress:    prog,

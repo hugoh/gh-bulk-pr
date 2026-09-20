@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/hugoh/gh-bulk-pr/internal/github"
 	"github.com/hugoh/gh-bulk-pr/internal/history"
 	"github.com/hugoh/gh-bulk-pr/internal/worker"
@@ -24,6 +26,7 @@ const (
 	textShort   = "short"
 	actionClose = "close"
 	actionMerge = "merge"
+	textAuto    = "auto"
 	prTitleFix  = "Fix bug"
 	testAuthor  = "hugoh"
 	testRepoA   = "hugoh/a"
@@ -50,7 +53,7 @@ func testPRs() []github.PR {
 func loadedModel() Model {
 	m := New(nil, "is:open is:pr")
 	m = m.handleResize(tea.WindowSizeMsg{Width: 100, Height: 30})
-	m = m.handleSearchDone(searchDoneMsg{prs: testPRs()})
+	m = m.handleSearchDone(searchDoneMsg{PRs: testPRs()})
 
 	return m
 }
@@ -138,7 +141,7 @@ func TestHandleSearchDone(t *testing.T) {
 		t.Parallel()
 
 		m := New(nil, "q")
-		m = m.handleSearchDone(searchDoneMsg{prs: testPRs()})
+		m = m.handleSearchDone(searchDoneMsg{PRs: testPRs()})
 
 		assert.False(t, m.loading)
 		require.NoError(t, m.err)
@@ -436,6 +439,51 @@ func TestHandleConfirmKey_DestructiveNeedsY(t *testing.T) {
 	}
 }
 
+func TestListKey_AutoMerge(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		cleanPRs        []int // indexes into the two loaded PRs that are already clean
+		wantDestructive bool
+		wantMergesNow   int
+	}{
+		"none clean stays easy": {},
+		"one clean needs an explicit yes": {
+			cleanPRs:        []int{1},
+			wantDestructive: true,
+			wantMergesNow:   1,
+		},
+		"all clean": {
+			cleanPRs:        []int{0, 1},
+			wantDestructive: true,
+			wantMergesNow:   2,
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := loadedModel()
+			for _, idx := range tt.cleanPRs {
+				m.prs[idx].MergeState = github.MergeClean
+			}
+
+			for _, pull := range m.prs {
+				m.selected[keyOf(pull)] = true
+			}
+
+			m, _ = m.handleListKeyByString("a")
+
+			require.Equal(t, screenConfirm, m.screen)
+			require.NotNil(t, m.action)
+			assert.Equal(t, "toggle auto-merge", m.action.label)
+			assert.Equal(t, tt.wantDestructive, m.action.destructive)
+			assert.Equal(t, tt.wantMergesNow, strings.Count(m.confirmBody(), "merges now"))
+		})
+	}
+}
+
 func TestHandleResultsKey(t *testing.T) {
 	t.Parallel()
 
@@ -501,7 +549,17 @@ func TestRowsFor(t *testing.T) {
 	assert.Equal(t, "x", rows[1][0])
 	assert.Equal(t, "#1", rows[0][2])
 	assert.Equal(t, "behind", rows[0][5])
-	assert.Equal(t, testAuthor, rows[0][6])
+	assert.Empty(t, rows[0][6], "no auto-merge cell when it is off")
+	assert.Equal(t, testAuthor, rows[0][7])
+}
+
+func TestRowsFor_ShowsAutoMerge(t *testing.T) {
+	t.Parallel()
+
+	light := github.PR{Number: 1, AutoMerge: true}
+	rows := rowsFor([]github.PR{light}, nil)
+
+	assert.Equal(t, "on", rows[0][6], "auto-merge comes with the light search, before details land")
 }
 
 func TestUpdate_WindowSize(t *testing.T) {
@@ -520,7 +578,7 @@ func TestUpdate_SearchDone(t *testing.T) {
 	t.Parallel()
 
 	m := New(nil, "q")
-	updated, _ := m.Update(searchDoneMsg{prs: testPRs()})
+	updated, _ := m.Update(searchDoneMsg{PRs: testPRs()})
 
 	mm, ok := updated.(Model)
 	require.True(t, ok)
@@ -538,6 +596,28 @@ func TestUpdate_ActionDone(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, screenResults, mm.screen)
 	assert.Nil(t, cmd)
+}
+
+func TestUpdate_ActionDone_AppliesOnDoneToSucceededPRs(t *testing.T) {
+	t.Parallel()
+
+	m := loadedModel()
+	m.action = &pendingAction{
+		label:  "toggle auto-merge",
+		onDone: func(pr *github.PR) { pr.AutoMerge = !pr.AutoMerge },
+	}
+
+	prs := testPRs()
+	updated, _ := m.Update(actionDoneMsg{results: []worker.Result{
+		{PR: prs[0]},
+		{PR: prs[1], Err: errors.New("boom")},
+	}})
+
+	mm, ok := updated.(Model)
+	require.True(t, ok)
+	assert.True(t, mm.prs[0].AutoMerge)
+	assert.False(t, mm.prs[1].AutoMerge, "a failed PR keeps its state")
+	assert.Equal(t, "on", mm.table.Rows()[0][6])
 }
 
 func TestUpdate_ActionProgress(t *testing.T) {
@@ -684,16 +764,106 @@ func TestHandleListKey_ToggleSelection_SameNumberInDifferentRepos(t *testing.T) 
 
 	m := New(nil, "is:open is:pr")
 	m = m.handleResize(tea.WindowSizeMsg{Width: 100, Height: 30})
-	m = m.handleSearchDone(searchDoneMsg{prs: []github.PR{
-		{Number: 7, Title: "First", Repo: testRepoA, Author: testAuthor},
-		{Number: 7, Title: "Second", Repo: testRepoB, Author: testAuthor},
-	}})
+	m = m.handleSearchDone(searchDoneMsg{
+		PRs: []github.PR{
+			{Number: 7, Title: "First", Repo: testRepoA, Author: testAuthor},
+			{Number: 7, Title: "Second", Repo: testRepoB, Author: testAuthor},
+		},
+	})
 
 	m, _ = m.handleListKeyByString("x")
 
 	got := m.selectedPRs()
 	require.Len(t, got, 1)
 	assert.Equal(t, testRepoA, got[0].Repo)
+}
+
+func TestFlipState(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		query  string
+		want   string
+		wantOK bool
+	}{
+		"open to closed":   {"is:open is:pr owner:@me", "is:closed is:pr owner:@me", true},
+		"closed to open":   {"is:closed is:pr owner:@me", "is:open is:pr owner:@me", true},
+		"extra whitespace": {"is:pr  is:open", "is:pr is:closed", true},
+		"no state":         {"is:pr owner:@me", "is:pr owner:@me", false},
+		"substring only":   {"is:pr label:is:opened", "is:pr label:is:opened", false},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got, ok := flipState(tt.query)
+			require.Equal(t, tt.wantOK, ok)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestTabFor_IgnoresOpenOrClosed(t *testing.T) {
+	t.Parallel()
+
+	closed, ok := flipState(tabs()[1].query)
+	require.True(t, ok)
+	assert.Equal(t, 1, tabFor(closed))
+}
+
+func TestTabBar_MarksTheActiveTabClosed(t *testing.T) {
+	t.Parallel()
+
+	open := New(nil, tabs()[0].query)
+	assert.NotContains(t, ansi.Strip(open.tabBar()), "(closed)")
+
+	closedQuery, _ := flipState(tabs()[0].query)
+	closed := New(nil, closedQuery)
+
+	bar := ansi.Strip(closed.tabBar())
+	assert.Equal(t, 1, strings.Count(bar, "(closed)"), "only the active tab says so")
+	assert.Contains(t, bar, tabs()[0].name+" (closed)")
+}
+
+func TestListKey_ToggleState(t *testing.T) {
+	t.Parallel()
+
+	m := loadedModel()
+	start := m.query
+
+	m, cmd := m.handleListKeyByString("s")
+	assert.Contains(t, m.query, "is:closed")
+	assert.NotContains(t, m.query, "is:open")
+	assert.True(t, m.loading)
+	require.NotNil(t, cmd)
+
+	m, _ = m.handleListKeyByString("s")
+	assert.Equal(t, start, m.query)
+}
+
+func TestListKey_ToggleState_WithoutStateSaysSo(t *testing.T) {
+	t.Parallel()
+
+	m := New(nil, "is:pr author:hugoh")
+	m = m.handleResize(tea.WindowSizeMsg{Width: 100, Height: 30})
+
+	m, cmd := m.handleListKeyByString("s")
+	assert.Equal(t, "is:pr author:hugoh", m.query)
+	assert.Contains(t, m.statusLine(), "is:open")
+	assert.Nil(t, cmd)
+}
+
+func TestListKey_TabKeepsClosedState(t *testing.T) {
+	t.Parallel()
+
+	m := loadedModel()
+	m, _ = m.handleListKeyByString("s")
+	m, _ = m.handleListKeyByString("2")
+
+	assert.Equal(t, 1, m.tab)
+	assert.Contains(t, m.query, "is:closed")
+	assert.Contains(t, m.query, "owner:@me")
 }
 
 func TestTabs(t *testing.T) {
@@ -837,7 +1007,7 @@ func TestSearchIgnoresStaleResults(t *testing.T) {
 	require.Greater(t, m.searchID, firstID)
 
 	m = m.handleSearchDone(
-		searchDoneMsg{id: firstID, prs: []github.PR{{Number: 99, Repo: testRepoA}}},
+		searchDoneMsg{PRs: []github.PR{{Number: 99, Repo: testRepoA}}, id: firstID},
 	)
 
 	assert.True(t, m.loading, "stale result must not end the loading state")
@@ -860,14 +1030,14 @@ func TestTabSwitchUsesCache(t *testing.T) {
 	t.Parallel()
 
 	m := New(nil, tabs()[0].query)
-	m = m.handleSearchDone(searchDoneMsg{query: tabs()[0].query, prs: testPRs()})
+	m = m.handleSearchDone(searchDoneMsg{PRs: testPRs(), query: tabs()[0].query})
 
 	m, _ = m.handleListKeyByString("2")
 	assert.Empty(t, m.prs, "uncached tab starts empty rather than showing another query's rows")
 	assert.Empty(t, m.table.Rows())
 
 	other := []github.PR{{Number: 5, Title: "Mine", Repo: testRepoA, Author: testAuthor}}
-	m = m.handleSearchDone(searchDoneMsg{id: m.searchID, query: tabs()[1].query, prs: other})
+	m = m.handleSearchDone(searchDoneMsg{PRs: other, id: m.searchID, query: tabs()[1].query})
 
 	m, cmd := m.handleListKeyByString("1")
 	assert.Equal(t, testPRs(), m.prs, "cached rows show immediately")
@@ -883,7 +1053,7 @@ func TestRefreshKeepsSelectionOfSurvivingPRs(t *testing.T) {
 	m.selected[keyOf(m.prs[0])] = true
 	m.selected[keyOf(m.prs[1])] = true
 
-	m = m.handleSearchDone(searchDoneMsg{prs: testPRs()[:1]})
+	m = m.handleSearchDone(searchDoneMsg{PRs: testPRs()[:1]})
 
 	assert.Equal(t, map[prKey]bool{keyOf(testPRs()[0]): true}, m.selected)
 }
@@ -903,7 +1073,7 @@ func TestFinishingActionForcesFullReload(t *testing.T) {
 	t.Parallel()
 
 	m := loadedModel()
-	m.cache[m.query] = results{prs: m.prs}
+	m.cache[m.query] = github.Page{PRs: m.prs}
 	m.screen = screenResults
 	m.results = []worker.Result{{}}
 
@@ -912,37 +1082,6 @@ func TestFinishingActionForcesFullReload(t *testing.T) {
 	assert.Empty(t, m.prs, "acted-on PRs must not linger as stale rows")
 	assert.Empty(t, m.selected)
 	assert.NotContains(t, m.cache, m.query)
-	assert.True(t, m.loading)
-}
-
-func TestLightSearchThenFull(t *testing.T) {
-	t.Parallel()
-
-	light := []github.PR{{Number: 1, Title: "Fix bug", Repo: testRepoA, Author: testAuthor}}
-
-	m := New(nil, "q")
-
-	m = m.handleSearchDone(searchDoneMsg{light: true, prs: light})
-	assert.Equal(t, light, m.prs, "light result paints the list")
-	assert.True(t, m.loading, "still waiting for the full result")
-	assert.Equal(t, "…", m.table.Rows()[0][4], "checks column is a placeholder until details land")
-	assert.Equal(t, "…", m.table.Rows()[0][5], "merge column is a placeholder until details land")
-
-	m = m.handleSearchDone(searchDoneMsg{prs: testPRs()})
-	assert.Equal(t, testPRs(), m.prs)
-	assert.False(t, m.loading)
-
-	m = m.handleSearchDone(searchDoneMsg{light: true, prs: light})
-	assert.Equal(t, testPRs(), m.prs, "late light result must not clobber the full one")
-}
-
-func TestLightSearchErrorIsIgnored(t *testing.T) {
-	t.Parallel()
-
-	m := New(nil, "q")
-	m = m.handleSearchDone(searchDoneMsg{light: true, err: assert.AnError})
-
-	require.NoError(t, m.err)
 	assert.True(t, m.loading)
 }
 
@@ -960,6 +1099,7 @@ func manyPRs(first, count int, detailed bool) []github.PR {
 	prs := make([]github.PR, count)
 	for i := range prs {
 		prs[i] = github.PR{
+			ID:       idOf(first + i),
 			Number:   first + i,
 			Title:    "PR",
 			Repo:     testRepoA,
@@ -979,20 +1119,9 @@ func pagedModel() Model {
 	m := New(nil, "q").handleResize(tea.WindowSizeMsg{Width: 100, Height: 30})
 
 	return m.handleSearchDone(searchDoneMsg{
-		query: "q", prs: manyPRs(1, 50, true), total: 312, cursor: "c1", hasNext: true,
+		PRs: manyPRs(1, 50, true), Total: 312, EndCursor: "c1", HasNext: true,
+		query: "q",
 	})
-}
-
-func lightNextPageModel(t *testing.T) Model {
-	t.Helper()
-
-	m := pagedModel()
-	m.loadingMore = true
-
-	m = m.handleSearchDone(searchDoneMsg{light: true, more: true, prs: manyPRs(51, 50, false)})
-	require.Len(t, m.prs, 100)
-
-	return m
 }
 
 func TestFullPageStoresPaging(t *testing.T) {
@@ -1003,72 +1132,11 @@ func TestFullPageStoresPaging(t *testing.T) {
 	assert.Equal(t, 312, m.total)
 	assert.Equal(t, "c1", m.endCursor)
 	assert.True(t, m.hasMore)
-	assert.Equal(t, results{prs: m.prs, total: 312, cursor: "c1", hasMore: true}, m.cache["q"])
-}
-
-func TestLightPageSetsTotalOnly(t *testing.T) {
-	t.Parallel()
-
-	m := New(nil, "q").handleSearchDone(searchDoneMsg{
-		light: true, prs: manyPRs(1, 3, false), total: 312, cursor: "c1", hasNext: true,
-	})
-
-	assert.Equal(t, 312, m.total)
-	assert.False(t, m.hasMore, "only the full result decides whether more can be loaded")
-	assert.Empty(t, m.endCursor)
-	assert.NotContains(t, m.cache, "q", "light rows are never cached")
-}
-
-func TestLightNeverOverwritesDetailedRow(t *testing.T) {
-	t.Parallel()
-
-	m := pagedModel()
-	m = m.handleSearchDone(searchDoneMsg{light: true, prs: manyPRs(1, 1, false)})
-
-	assert.True(t, m.prs[0].Detailed)
-	assert.Equal(t, github.ChecksPass, m.prs[0].Checks)
-	assert.Len(t, m.prs, 50)
-}
-
-func TestLoadMore_LightThenFull(t *testing.T) {
-	t.Parallel()
-
-	m := pagedModel()
-	m.loadingMore = true
-
-	m = m.handleSearchDone(
-		searchDoneMsg{light: true, more: true, prs: manyPRs(51, 50, false), total: 312},
+	assert.Equal(
+		t,
+		github.Page{PRs: m.prs, Total: 312, EndCursor: "c1", HasNext: true},
+		m.cache["q"],
 	)
-	assert.Len(t, m.prs, 100, "light rows are appended right away")
-	assert.Equal(t, "…", m.table.Rows()[50][4])
-	assert.True(t, m.loadingMore, "still waiting for the full page")
-
-	m = m.handleSearchDone(
-		searchDoneMsg{query: "q", more: true, prs: manyPRs(51, 50, true), total: 312, cursor: "c2"},
-	)
-	assert.Len(t, m.prs, 100, "full rows replace the light ones in place")
-	assert.True(t, m.prs[99].Detailed)
-	assert.NotEqual(t, "…", m.table.Rows()[50][4])
-	assert.False(t, m.loadingMore)
-	assert.Equal(t, "c2", m.endCursor)
-	assert.False(t, m.hasMore)
-	assert.Len(t, m.cache["q"].prs, 100)
-	assert.Equal(t, "c2", m.cache["q"].cursor)
-}
-
-func TestLoadMore_FullBeforeLight(t *testing.T) {
-	t.Parallel()
-
-	m := pagedModel()
-	m.loadingMore = true
-
-	m = m.handleSearchDone(
-		searchDoneMsg{more: true, prs: manyPRs(51, 50, true), cursor: "c2", hasNext: true},
-	)
-	m = m.handleSearchDone(searchDoneMsg{light: true, more: true, prs: manyPRs(51, 50, false)})
-
-	assert.Len(t, m.prs, 100)
-	assert.True(t, m.prs[99].Detailed, "late light page must not downgrade rows")
 }
 
 func TestLoadMore_DedupesShiftedResults(t *testing.T) {
@@ -1077,7 +1145,7 @@ func TestLoadMore_DedupesShiftedResults(t *testing.T) {
 	m := pagedModel()
 	m.loadingMore = true
 
-	m = m.handleSearchDone(searchDoneMsg{more: true, prs: manyPRs(50, 50, true)})
+	m = m.handleSearchDone(searchDoneMsg{PRs: manyPRs(50, 50, true), more: true})
 
 	assert.Len(t, m.prs, 99, "PR 50 was already on the first page")
 }
@@ -1107,7 +1175,7 @@ func TestLoadMore_StaleResultDroppedAfterReload(t *testing.T) {
 	m, _ = reloaded(t, m)
 	assert.False(t, m.loadingMore, "a new search abandons the in-flight page")
 
-	m = m.handleSearchDone(searchDoneMsg{id: staleID, more: true, prs: manyPRs(51, 50, true)})
+	m = m.handleSearchDone(searchDoneMsg{PRs: manyPRs(51, 50, true), id: staleID, more: true})
 	assert.Len(t, m.prs, 50)
 }
 
@@ -1186,11 +1254,8 @@ func TestTabSwitchRestoresPaging(t *testing.T) {
 	m := New(nil, first)
 	m = m.handleSearchDone(
 		searchDoneMsg{
-			query:   first,
-			prs:     manyPRs(1, 50, true),
-			total:   312,
-			cursor:  "c1",
-			hasNext: true,
+			PRs: manyPRs(1, 50, true), Total: 312, EndCursor: "c1", HasNext: true,
+			query: first,
 		},
 	)
 
@@ -1347,66 +1412,10 @@ func TestFinishedMorePageReleasesItsContext(t *testing.T) {
 	m.loadingMore = true
 	m.cancelMore = func() { released = true }
 
-	m = m.handleSearchDone(searchDoneMsg{query: "q", more: true, prs: manyPRs(51, 1, true)})
+	m = m.handleSearchDone(searchDoneMsg{PRs: manyPRs(51, 1, true), query: "q", more: true})
 
 	assert.True(t, released)
 	assert.Nil(t, m.cancelMore)
-}
-
-func TestLoadMore_FullDropsLightRowsItDidNotReturn(t *testing.T) {
-	t.Parallel()
-
-	m := lightNextPageModel(t)
-
-	// PR 100 was updated between the two calls and slid off this page; 101 slid on.
-	full := append(manyPRs(51, 49, true), manyPRs(101, 1, true)...)
-	m = m.handleSearchDone(
-		searchDoneMsg{query: "q", more: true, prs: full, cursor: "c2", hasNext: true},
-	)
-
-	assert.Len(t, m.prs, 100)
-
-	for _, pr := range m.prs {
-		assert.True(t, pr.Detailed, "PR %d must not be left as a placeholder row", pr.Number)
-		assert.NotEqual(t, 100, pr.Number)
-	}
-
-	assert.Equal(t, 101, m.prs[99].Number)
-}
-
-func TestLoadMore_LightAfterFullIsIgnored(t *testing.T) {
-	t.Parallel()
-
-	m := pagedModel()
-	m.loadingMore = true
-
-	m = m.handleSearchDone(searchDoneMsg{query: "q", more: true, prs: manyPRs(51, 10, true)})
-	m = m.handleSearchDone(searchDoneMsg{light: true, more: true, prs: manyPRs(51, 12, false)})
-
-	assert.Len(t, m.prs, 60, "the light page has nothing left to add once the full one landed")
-}
-
-func TestLightPageOneAfterFullIsIgnored(t *testing.T) {
-	t.Parallel()
-
-	m := pagedModel()
-	m = m.handleSearchDone(searchDoneMsg{light: true, prs: manyPRs(1, 51, false)})
-
-	assert.Len(t, m.prs, 50)
-}
-
-func TestLoadMore_FailedPageDropsItsPlaceholders(t *testing.T) {
-	t.Parallel()
-
-	m := lightNextPageModel(t)
-	m.selected[keyOf(m.prs[75])] = true
-
-	m = m.handleSearchDone(searchDoneMsg{more: true, err: assert.AnError})
-
-	assert.Len(t, m.prs, 50, "the failed page's rows go; a retry fetches them again")
-	assert.Empty(t, m.selected, "selection can't point at rows that are gone")
-	require.ErrorIs(t, m.moreErr, assert.AnError)
-	assert.Len(t, m.table.Rows(), 50)
 }
 
 func TestQuitWithASelectionNeedsASecondPress(t *testing.T) {
@@ -1630,7 +1639,7 @@ func TestOpenInBrowser(t *testing.T) {
 
 			m := browserModel(0, &opened, nil)
 			if tt.noRows {
-				m = m.withResults(results{}).refreshRows()
+				m = m.withResults(github.Page{}).refreshRows()
 			}
 
 			m.table.SetCursor(tt.cursor)
@@ -1762,4 +1771,35 @@ func TestNew_HasARealBrowserByDefault(t *testing.T) {
 	t.Parallel()
 
 	require.NotNil(t, New(nil, "q").open)
+}
+
+func TestLoadMore_AppendsThePageAndCachesIt(t *testing.T) {
+	t.Parallel()
+
+	m := pagedModel()
+	m.loadingMore = true
+
+	m = m.handleSearchDone(searchDoneMsg{
+		PRs: manyPRs(51, 50, false), Total: 312, EndCursor: "c2", HasNext: true,
+		query: "q",
+		more:  true,
+	})
+
+	assert.Len(t, m.prs, 100)
+	assert.Equal(t, "…", m.table.Rows()[50][4], "the new rows wait for their details")
+	assert.False(t, m.loadingMore)
+	assert.Equal(t, "c2", m.endCursor)
+	assert.True(t, m.hasMore)
+	assert.Len(t, m.cache["q"].PRs, 100)
+	assert.Equal(t, "c2", m.cache["q"].EndCursor)
+}
+
+func TestSearchDone_ShowsRowsWithPlaceholdersUntilDetailsLand(t *testing.T) {
+	t.Parallel()
+
+	m := New(nil, "q").handleSearchDone(searchDoneMsg{PRs: manyPRs(1, 3, false)})
+
+	assert.False(t, m.loading)
+	assert.Equal(t, "…", m.table.Rows()[0][4])
+	assert.Equal(t, "…", m.table.Rows()[0][5])
 }
