@@ -137,7 +137,8 @@ type searchNode struct {
 	}
 }
 
-const searchPageSize = 50
+// SearchPageSize is how many PRs each search request fetches.
+const SearchPageSize = 50
 
 // SearchPage fetches one page of a GitHub search query (e.g.
 // "is:open is:pr involves:@me"), starting after cursor ("" for the first
@@ -158,7 +159,7 @@ func (c *Client) SearchPage(ctx context.Context, query, after string, light bool
 
 	var resp searchResponse
 
-	vars := map[string]any{"q": query, "count": searchPageSize, "after": cursor}
+	vars := map[string]any{"q": query, "count": SearchPageSize, "after": cursor}
 	if err := c.gql.DoWithContext(
 		ctx,
 		searchQueryHead+fields+searchQueryTail,

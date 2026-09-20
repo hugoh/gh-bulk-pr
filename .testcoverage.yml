@@ -7,3 +7,4 @@ threshold:
 exclude:
   paths:
     - ^main\.go$
+    - ^cmd/genreadme/

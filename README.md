@@ -15,39 +15,43 @@ gh bulk-pr
 gh bulk-pr --query "is:open is:pr author:@me archived:false"
 ```
 
-| Flag        | Default                                       | Description                       |
-| ----------- | --------------------------------------------- | --------------------------------- |
-| `--query`   | `is:open is:pr archived:false sort:updated-desc involves:@me`   | GitHub search query for the list  |
-| `--mouse`   | off                                           | Scroll with the mouse wheel (hold shift to select text) |
-| `--version` |                                               | Print version and exit            |
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--mouse` | `false` | scroll with the mouse wheel (the terminal then needs shift to select text) |
+| `--query` | `is:open is:pr archived:false sort:updated-desc involves:@me` | GitHub search query for the PR list |
+| `--version` | `false` | print version and exit |
 
 ## Keys
 
 Press `?` in the app for this list.
 
-| Key                       | Action                                         |
-| ------------------------- | ---------------------------------------------- |
-| `↑`/`↓`, `j`/`k`          | Move                                           |
-| `g`/`home`, `G`/`end`     | Jump to the first / last loaded row            |
-| `pgup`/`b`, `pgdn`/`f`    | Page up / down                                 |
-| `x` / `space`             | Toggle selection                               |
-| `ctrl+a`                  | Select all loaded rows                         |
-| `1` / `2`                 | Switch tab: `involves:@me` / `owner:@me`       |
-| `/`                       | Edit the full search query                     |
-| `enter` / `p`             | Toggle preview                                 |
-| `o`                       | Open the PR under the cursor in the browser    |
-| `O`                       | Open all selected PRs (asks above 5, max 20)   |
-| `T`                       | Open the PR in `gh enhance` (checks)           |
-| `l`                       | Add label to selected PRs                      |
-| `c`                       | Close selected PRs                             |
-| `m`                       | Merge selected PRs                             |
-| `r`                       | Refresh the PR list                            |
-| `esc`                     | Close preview, then clear selection            |
-| `?`                       | Show all keys                                  |
-| `q`                       | Quit (press twice when PRs are selected)       |
-| `ctrl+c`                  | Quit at once, from any screen                  |
+| Key | Action |
+| --- | --- |
+| `↑/k` | up |
+| `↓/j` | down |
+| `g/home` | top |
+| `G/end` | bottom |
+| `pgup/b` | page up |
+| `pgdn/f` | page down |
+| `x/space` | select |
+| `ctrl+a` | select all |
+| `esc` | close/clear |
+| `enter/p` | preview |
+| `/` | filter |
+| `1/2` | tab |
+| `r` | refresh |
+| `T` | checks |
+| `o` | open |
+| `O` | open all |
+| `l` | label |
+| `c` | close |
+| `m` | merge |
+| `?` | help |
+| `q` | quit |
 
-Both tabs share the base query `is:open is:pr archived:false sort:updated-desc`. Editing the query with `/` deselects the tab unless it still matches one.
+`ctrl+c` quits at once from any screen; `q` needs a second press while PRs are selected. `O` asks for confirmation above 5 PRs and opens at most 20.
+
+Tabs (`1`/`2`): `involves:@me`, `owner:@me`. All share the base query `is:open is:pr archived:false sort:updated-desc`. Editing the query with `/` deselects the tab unless it still matches one.
 
 Queries run from the filter bar or a tab are appended to `$XDG_STATE_HOME/gh-bulk-pr/history` (`~/.local/state/gh-bulk-pr/history`). Press `↑`/`↓` in the search field to recall them.
 
