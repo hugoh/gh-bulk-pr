@@ -252,7 +252,7 @@ func (m Model) render() string {
 // key hints, or the prompt being typed into.
 func (m Model) viewList(footer string) string {
 	header := headerStyle().Render("gh-bulk-pr") +
-		"  " + m.tabBar() + "  " + helpStyle().Render(m.query)
+		"  " + m.tabBar() + separatorStyle().Render("│") + " " + helpStyle().Render(m.query)
 
 	var body string
 

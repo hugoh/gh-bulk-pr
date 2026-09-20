@@ -1046,3 +1046,12 @@ func TestViewList_LoadingMoreIndicatorStaysAboveThePreview(t *testing.T) {
 
 	assert.Less(t, strings.Index(view, "loading more…"), strings.Index(view, "───"))
 }
+
+func TestViewList_HeaderSeparatesTabsFromQuery(t *testing.T) {
+	t.Parallel()
+
+	m := New(nil, tabs()[0].query).handleResize(tea.WindowSizeMsg{Width: 200, Height: 30})
+	header, _, _ := strings.Cut(ansi.Strip(m.View().Content), "\n")
+
+	assert.Contains(t, header, tabs()[1].name+" │ "+tabs()[0].query)
+}
