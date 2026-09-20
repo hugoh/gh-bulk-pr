@@ -983,6 +983,18 @@ func pagedModel() Model {
 	})
 }
 
+func lightNextPageModel(t *testing.T) Model {
+	t.Helper()
+
+	m := pagedModel()
+	m.loadingMore = true
+
+	m = m.handleSearchDone(searchDoneMsg{light: true, more: true, prs: manyPRs(51, 50, false)})
+	require.Len(t, m.prs, 100)
+
+	return m
+}
+
 func TestFullPageStoresPaging(t *testing.T) {
 	t.Parallel()
 
@@ -1344,11 +1356,7 @@ func TestFinishedMorePageReleasesItsContext(t *testing.T) {
 func TestLoadMore_FullDropsLightRowsItDidNotReturn(t *testing.T) {
 	t.Parallel()
 
-	m := pagedModel()
-	m.loadingMore = true
-
-	m = m.handleSearchDone(searchDoneMsg{light: true, more: true, prs: manyPRs(51, 50, false)})
-	require.Len(t, m.prs, 100)
+	m := lightNextPageModel(t)
 
 	// PR 100 was updated between the two calls and slid off this page; 101 slid on.
 	full := append(manyPRs(51, 49, true), manyPRs(101, 1, true)...)
@@ -1390,12 +1398,8 @@ func TestLightPageOneAfterFullIsIgnored(t *testing.T) {
 func TestLoadMore_FailedPageDropsItsPlaceholders(t *testing.T) {
 	t.Parallel()
 
-	m := pagedModel()
-	m.loadingMore = true
-
-	m = m.handleSearchDone(searchDoneMsg{light: true, more: true, prs: manyPRs(51, 50, false)})
+	m := lightNextPageModel(t)
 	m.selected[keyOf(m.prs[75])] = true
-	require.Len(t, m.prs, 100)
 
 	m = m.handleSearchDone(searchDoneMsg{more: true, err: assert.AnError})
 

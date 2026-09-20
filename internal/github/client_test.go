@@ -157,17 +157,28 @@ const searchResponseJSON = `{
   }
 }`
 
+func searchClientCapturing(
+	t *testing.T,
+	sent *string,
+	hasNext bool,
+	endCursor string,
+) *api.GraphQLClient {
+	t.Helper()
+
+	return newTestGraphQLClient(t, func(r *http.Request) (*http.Response, error) {
+		body, _ := io.ReadAll(r.Body)
+		*sent = string(body)
+
+		return jsonResponse(fmt.Sprintf(searchResponseJSON, hasNext, endCursor)), nil
+	})
+}
+
 func TestSearchPage(t *testing.T) {
 	t.Parallel()
 
 	var sent string
 
-	gql := newTestGraphQLClient(t, func(r *http.Request) (*http.Response, error) {
-		body, _ := io.ReadAll(r.Body)
-		sent = string(body)
-
-		return jsonResponse(fmt.Sprintf(searchResponseJSON, true, "cursor2")), nil
-	})
+	gql := searchClientCapturing(t, &sent, true, "cursor2")
 
 	page, err := (&Client{gql: gql}).SearchPage(
 		context.Background(),
@@ -199,12 +210,7 @@ func TestSearchPage_FirstPageSendsNullCursor(t *testing.T) {
 
 	var sent string
 
-	gql := newTestGraphQLClient(t, func(r *http.Request) (*http.Response, error) {
-		body, _ := io.ReadAll(r.Body)
-		sent = string(body)
-
-		return jsonResponse(fmt.Sprintf(searchResponseJSON, false, "")), nil
-	})
+	gql := searchClientCapturing(t, &sent, false, "")
 
 	page, err := (&Client{gql: gql}).SearchPage(context.Background(), "is:open is:pr", "", false)
 	require.NoError(t, err)
@@ -229,12 +235,7 @@ func TestSearchPage_LightSkipsExpensiveFields(t *testing.T) {
 
 	var sent string
 
-	gql := newTestGraphQLClient(t, func(r *http.Request) (*http.Response, error) {
-		body, _ := io.ReadAll(r.Body)
-		sent = string(body)
-
-		return jsonResponse(fmt.Sprintf(searchResponseJSON, false, "")), nil
-	})
+	gql := searchClientCapturing(t, &sent, false, "")
 
 	page, err := (&Client{gql: gql}).SearchPage(context.Background(), "is:open is:pr", "", true)
 	require.NoError(t, err)
