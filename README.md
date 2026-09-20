@@ -18,7 +18,7 @@ gh bulk-pr --query "is:open is:pr author:@me archived:false"
 | Flag | Default | Description |
 | --- | --- | --- |
 | `--mouse` | `false` | scroll with the mouse wheel (the terminal then needs shift to select text) |
-| `--query` | `is:open is:pr archived:false sort:updated-desc involves:@me` | GitHub search query for the PR list |
+| `--query` | `is:open is:pr archived:false sort:updated-desc owner:@me` | GitHub search query for the PR list |
 | `--version` | `false` | print version and exit |
 
 ## Keys
@@ -55,7 +55,7 @@ Press `?` in the app for this list.
 
 `ctrl+c` quits at once from any screen; `q` needs a second press while PRs are selected. `O` asks for confirmation above 5 PRs and opens at most 20.
 
-Tabs (`1`/`2`): `involves:@me`, `owner:@me`. All share the base query `is:open is:pr archived:false sort:updated-desc`. Editing the query with `/` deselects the tab unless it still matches one.
+Tabs (`1`/`2`): `owner:@me`, `involves:@me`. All share the base query `is:open is:pr archived:false sort:updated-desc`. Editing the query with `/` deselects the tab unless it still matches one.
 
 Queries run from the filter bar or a tab are appended to `$XDG_STATE_HOME/gh-bulk-pr/history` (`~/.local/state/gh-bulk-pr/history`). Press `↑`/`↓` in the search field to recall them.
 
