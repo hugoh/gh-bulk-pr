@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/charmbracelet/bubbles/spinner"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/spinner"
+	tea "charm.land/bubbletea/v2"
 	"github.com/hugoh/gh-bulk-pr/internal/github"
 	"github.com/hugoh/gh-bulk-pr/internal/history"
 	"github.com/hugoh/gh-bulk-pr/internal/worker"
@@ -55,23 +55,23 @@ func loadedModel() Model {
 	return m
 }
 
-// keyMsgFromString builds a tea.KeyMsg whose String() matches s, for the
+// keyMsgFromString builds a tea.KeyPressMsg whose String() matches s, for the
 // handful of key forms this app switches on ("esc", "enter", "ctrl+a",
-// "ctrl+c", or a single printable rune like "x" or "/").
-func keyMsgFromString(s string) tea.KeyMsg {
+// "ctrl+c", "space", or a single printable rune like "x" or "/").
+func keyMsgFromString(s string) tea.KeyPressMsg {
 	switch s {
 	case "esc":
-		return tea.KeyMsg{Type: tea.KeyEsc}
+		return tea.KeyPressMsg{Code: tea.KeyEsc}
 	case "enter":
-		return tea.KeyMsg{Type: tea.KeyEnter}
+		return tea.KeyPressMsg{Code: tea.KeyEnter}
 	case "ctrl+a":
-		return tea.KeyMsg{Type: tea.KeyCtrlA}
+		return tea.KeyPressMsg{Code: 'a', Mod: tea.ModCtrl}
 	case "ctrl+c":
-		return tea.KeyMsg{Type: tea.KeyCtrlC}
-	case " ":
-		return tea.KeyMsg{Type: tea.KeySpace}
+		return tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}
+	case " ", "space":
+		return tea.KeyPressMsg{Code: tea.KeySpace, Text: " "}
 	default:
-		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
+		return tea.KeyPressMsg{Code: rune(s[0]), Text: s}
 	}
 }
 
@@ -191,7 +191,7 @@ func TestCtrlCQuitsFromEveryScreen(t *testing.T) {
 			m.action = &pendingAction{label: actionClose, run: noopAction}
 			m.results = nil // a bulk action still running
 
-			_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+			_, cmd := m.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 			require.NotNil(t, cmd)
 
 			_, ok := cmd().(tea.QuitMsg)
@@ -321,7 +321,7 @@ func TestHandleFilterKey(t *testing.T) {
 		m.screen = screenFilter
 		m.filterInput.SetValue("is:open author:hugoh")
 
-		m, cmd := m.handleFilterKey(tea.KeyMsg{Type: tea.KeyEnter})
+		m, cmd := m.handleFilterKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 		assert.Equal(t, screenList, m.screen)
 		assert.Equal(t, "is:open author:hugoh", m.query)
@@ -337,7 +337,7 @@ func TestHandleFilterKey(t *testing.T) {
 		m.screen = screenFilter
 		m.filterInput.SetValue("something else")
 
-		m, _ = m.handleFilterKey(tea.KeyMsg{Type: tea.KeyEsc})
+		m, _ = m.handleFilterKey(tea.KeyPressMsg{Code: tea.KeyEsc})
 
 		assert.Equal(t, screenList, m.screen)
 		assert.Equal(t, original, m.query)
@@ -356,7 +356,7 @@ func TestHandleActionInputKey(t *testing.T) {
 		m.actionKey = "l"
 		m.actionInput.SetValue("bug")
 
-		m, _ = m.handleActionInputKey(tea.KeyMsg{Type: tea.KeyEnter})
+		m, _ = m.handleActionInputKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 		assert.Equal(t, screenConfirm, m.screen)
 		require.NotNil(t, m.action)
@@ -371,7 +371,7 @@ func TestHandleActionInputKey(t *testing.T) {
 		m.screen = screenActionInput
 		m.actionKey = "l"
 
-		m, _ = m.handleActionInputKey(tea.KeyMsg{Type: tea.KeyEsc})
+		m, _ = m.handleActionInputKey(tea.KeyPressMsg{Code: tea.KeyEsc})
 
 		assert.Equal(t, screenList, m.screen)
 	})
@@ -388,7 +388,7 @@ func TestHandleConfirmKey(t *testing.T) {
 		m.confirm = testPRs()
 		m.action = &pendingAction{label: actionClose, run: noopAction}
 
-		m, cmd := m.handleConfirmKey(tea.KeyMsg{Type: tea.KeyEnter})
+		m, cmd := m.handleConfirmKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 		assert.Equal(t, screenResults, m.screen)
 		assert.Nil(t, m.results)
@@ -420,7 +420,7 @@ func TestHandleConfirmKey_DestructiveNeedsY(t *testing.T) {
 			m.confirm = testPRs()
 			m.action = &pendingAction{label: label, run: noopAction, destructive: true}
 
-			same, cmd := m.handleConfirmKey(tea.KeyMsg{Type: tea.KeyEnter})
+			same, cmd := m.handleConfirmKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 			assert.Equal(
 				t,
 				screenConfirm,
@@ -443,7 +443,7 @@ func TestHandleResultsKey(t *testing.T) {
 	m.screen = screenResults
 	m.results = []worker.Result{}
 
-	m, cmd := m.handleResultsKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m, cmd := m.handleResultsKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	assert.Equal(t, screenList, m.screen)
 	assert.True(t, m.loading)
@@ -453,12 +453,12 @@ func TestHandleResultsKey(t *testing.T) {
 func TestHandleResultsKey_IgnoredWhileRunning(t *testing.T) {
 	t.Parallel()
 
-	for _, keyType := range []tea.KeyType{tea.KeyEnter, tea.KeyEsc} {
+	for _, keyType := range []rune{tea.KeyEnter, tea.KeyEsc} {
 		m := loadedModel()
 		m.screen = screenResults
 		m.results = nil
 
-		m, cmd := m.handleResultsKey(tea.KeyMsg{Type: keyType})
+		m, cmd := m.handleResultsKey(tea.KeyPressMsg{Code: keyType})
 
 		assert.Equal(t, screenResults, m.screen, "the screen must not change mid-run")
 		assert.Nil(t, cmd)
@@ -607,7 +607,12 @@ func TestUpdate_UnknownMsg(t *testing.T) {
 
 	updated, cmd := m.Update(struct{}{})
 
-	assert.Equal(t, m, updated)
+	// bubbles v2's viewport.Model (embedded in both the table and the confirm
+	// pane) carries a non-nil default gutter func, so reflect.DeepEqual (which
+	// assert.Equal uses) can never call two of them equal, even when they're
+	// the very same value copied by value. Compare formatted representations
+	// instead, which render identically for identical values.
+	assert.Equal(t, fmt.Sprintf("%#v", m), fmt.Sprintf("%#v", updated))
 	assert.Nil(t, cmd)
 }
 
@@ -741,7 +746,7 @@ func TestTabs(t *testing.T) {
 		m.screen = screenFilter
 		m.filterInput.SetValue("is:open is:pr author:hugoh")
 
-		m, _ = m.handleFilterKey(tea.KeyMsg{Type: tea.KeyEnter})
+		m, _ = m.handleFilterKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 		assert.Equal(t, noTab, m.tab)
 	})
 
@@ -752,14 +757,14 @@ func TestTabs(t *testing.T) {
 		m.screen = screenFilter
 		m.filterInput.SetValue("is:open  is:pr archived:false sort:updated-desc owner:@me")
 
-		m, _ = m.handleFilterKey(tea.KeyMsg{Type: tea.KeyEnter})
+		m, _ = m.handleFilterKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 		assert.Equal(t, 1, m.tab)
 	})
 
 	t.Run("view shows the tab names", func(t *testing.T) {
 		t.Parallel()
 
-		view := loadedModel().View()
+		view := loadedModel().View().Content
 		assert.Contains(t, view, "involves:@me")
 		assert.Contains(t, view, "owner:@me")
 	})
@@ -902,7 +907,7 @@ func TestFinishingActionForcesFullReload(t *testing.T) {
 	m.screen = screenResults
 	m.results = []worker.Result{{}}
 
-	m, _ = m.handleResultsKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m, _ = m.handleResultsKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	assert.Empty(t, m.prs, "acted-on PRs must not linger as stale rows")
 	assert.Empty(t, m.selected)
@@ -976,6 +981,18 @@ func pagedModel() Model {
 	return m.handleSearchDone(searchDoneMsg{
 		query: "q", prs: manyPRs(1, 50, true), total: 312, cursor: "c1", hasNext: true,
 	})
+}
+
+func lightNextPageModel(t *testing.T) Model {
+	t.Helper()
+
+	m := pagedModel()
+	m.loadingMore = true
+
+	m = m.handleSearchDone(searchDoneMsg{light: true, more: true, prs: manyPRs(51, 50, false)})
+	require.Len(t, m.prs, 100)
+
+	return m
 }
 
 func TestFullPageStoresPaging(t *testing.T) {
@@ -1077,7 +1094,7 @@ func TestLoadMore_ErrorKeepsRows(t *testing.T) {
 	require.ErrorIs(t, m.moreErr, assert.AnError)
 	assert.False(t, m.loadingMore)
 	assert.Len(t, m.prs, 50)
-	assert.Contains(t, m.View(), "load more failed")
+	assert.Contains(t, m.View().Content, "load more failed")
 }
 
 func TestLoadMore_StaleResultDroppedAfterReload(t *testing.T) {
@@ -1218,8 +1235,8 @@ func TestFilterHistoryRecall(t *testing.T) {
 	m := openFilter(t, loadedModel().WithHistory(log))
 	m.filterInput.SetValue("draft")
 
-	press := func(m Model, keyType tea.KeyType) Model {
-		m, _ = m.handleFilterKey(tea.KeyMsg{Type: keyType})
+	press := func(m Model, keyType rune) Model {
+		m, _ = m.handleFilterKey(tea.KeyPressMsg{Code: keyType})
 
 		return m
 	}
@@ -1272,7 +1289,7 @@ func TestFilterHistoryRecall_NoHistory(t *testing.T) {
 	m, cmd := loadedModel().handleListKeyByString("/")
 	assert.Nil(t, cmd, "nothing to load without a history log")
 
-	m, _ = m.handleFilterKey(tea.KeyMsg{Type: tea.KeyUp})
+	m, _ = m.handleFilterKey(tea.KeyPressMsg{Code: tea.KeyUp})
 
 	assert.Equal(t, m.query, m.filterInput.Value())
 }
@@ -1339,11 +1356,7 @@ func TestFinishedMorePageReleasesItsContext(t *testing.T) {
 func TestLoadMore_FullDropsLightRowsItDidNotReturn(t *testing.T) {
 	t.Parallel()
 
-	m := pagedModel()
-	m.loadingMore = true
-
-	m = m.handleSearchDone(searchDoneMsg{light: true, more: true, prs: manyPRs(51, 50, false)})
-	require.Len(t, m.prs, 100)
+	m := lightNextPageModel(t)
 
 	// PR 100 was updated between the two calls and slid off this page; 101 slid on.
 	full := append(manyPRs(51, 49, true), manyPRs(101, 1, true)...)
@@ -1385,12 +1398,8 @@ func TestLightPageOneAfterFullIsIgnored(t *testing.T) {
 func TestLoadMore_FailedPageDropsItsPlaceholders(t *testing.T) {
 	t.Parallel()
 
-	m := pagedModel()
-	m.loadingMore = true
-
-	m = m.handleSearchDone(searchDoneMsg{light: true, more: true, prs: manyPRs(51, 50, false)})
+	m := lightNextPageModel(t)
 	m.selected[keyOf(m.prs[75])] = true
-	require.Len(t, m.prs, 100)
 
 	m = m.handleSearchDone(searchDoneMsg{more: true, err: assert.AnError})
 
@@ -1451,15 +1460,15 @@ func TestCtrlCQuitsEvenWithASelection(t *testing.T) {
 	m := loadedModel()
 	m.selected[keyOf(m.prs[0])] = true
 
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	_, cmd := m.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	require.NotNil(t, cmd)
 
 	_, ok := cmd().(tea.QuitMsg)
 	assert.True(t, ok)
 }
 
-func wheel(button tea.MouseButton) tea.MouseMsg {
-	return tea.MouseMsg{Action: tea.MouseActionPress, Button: button}
+func wheel(button tea.MouseButton) tea.MouseWheelMsg {
+	return tea.MouseWheelMsg{Button: button}
 }
 
 func TestMouseWheelMovesTheCursor(t *testing.T) {
@@ -1467,12 +1476,12 @@ func TestMouseWheelMovesTheCursor(t *testing.T) {
 
 	m := pagedModel()
 
-	updated, _ := m.Update(wheel(tea.MouseButtonWheelDown))
+	updated, _ := m.Update(wheel(tea.MouseWheelDown))
 	down, ok := updated.(Model)
 	require.True(t, ok)
 	assert.Equal(t, wheelStep, down.table.Cursor())
 
-	updated, _ = down.Update(wheel(tea.MouseButtonWheelUp))
+	updated, _ = down.Update(wheel(tea.MouseWheelUp))
 	up, ok := updated.(Model)
 	require.True(t, ok)
 	assert.Zero(t, up.table.Cursor())
@@ -1484,7 +1493,7 @@ func TestMouseWheelNearTheBottomLoadsMore(t *testing.T) {
 	m := pagedModel()
 	m.table.SetCursor(50 - loadMoreMargin - wheelStep)
 
-	updated, cmd := m.Update(wheel(tea.MouseButtonWheelDown))
+	updated, cmd := m.Update(wheel(tea.MouseWheelDown))
 	scrolled, ok := updated.(Model)
 	require.True(t, ok)
 
@@ -1496,9 +1505,9 @@ func TestMouseIgnoresEverythingButWheelPresses(t *testing.T) {
 	t.Parallel()
 
 	for name, msg := range map[string]tea.MouseMsg{
-		"left click":    {Action: tea.MouseActionPress, Button: tea.MouseButtonLeft},
-		"wheel release": {Action: tea.MouseActionRelease, Button: tea.MouseButtonWheelDown},
-		"motion":        {Action: tea.MouseActionMotion, Button: tea.MouseButtonWheelDown},
+		"left click":    tea.MouseClickMsg{Button: tea.MouseLeft},
+		"wheel release": tea.MouseReleaseMsg{Button: tea.MouseWheelDown},
+		"motion":        tea.MouseMotionMsg{Button: tea.MouseWheelDown},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -1516,11 +1525,11 @@ func TestMouseIgnoresEverythingButWheelPresses(t *testing.T) {
 func TestMouseWheelScrollsTheConfirmList(t *testing.T) {
 	t.Parallel()
 
-	updated, _ := bigConfirmModel().Update(wheel(tea.MouseButtonWheelDown))
+	updated, _ := bigConfirmModel().Update(wheel(tea.MouseWheelDown))
 	scrolled, ok := updated.(Model)
 	require.True(t, ok)
 
-	assert.Positive(t, scrolled.pane.YOffset)
+	assert.Positive(t, scrolled.pane.YOffset())
 	assert.Equal(t, screenConfirm, scrolled.screen)
 }
 
@@ -1530,7 +1539,7 @@ func TestMouseWheelIsIgnoredWhilePrompting(t *testing.T) {
 	m := pagedModel()
 	m.screen = screenFilter
 
-	updated, _ := m.Update(wheel(tea.MouseButtonWheelDown))
+	updated, _ := m.Update(wheel(tea.MouseWheelDown))
 	same, ok := updated.(Model)
 	require.True(t, ok)
 

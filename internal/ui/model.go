@@ -6,14 +6,14 @@ import (
 	"context"
 	"sync/atomic"
 
-	"github.com/charmbracelet/bubbles/help"
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/progress"
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/table"
-	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/help"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/progress"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/table"
+	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
 	"github.com/hugoh/gh-bulk-pr/internal/github"
 	"github.com/hugoh/gh-bulk-pr/internal/history"
 	"github.com/hugoh/gh-bulk-pr/internal/worker"
@@ -94,6 +94,7 @@ type Model struct {
 	openArmed   bool                   // O was pressed with a large selection; a second O opens them
 	quitArmed   bool                   // q was pressed with a selection; a second q quits
 	previewOpen bool
+	mouseMode   tea.MouseMode // set once via WithMouse; reported by View
 	err         error
 	moreErr     error // last failure loading a further page; the list stays usable
 	loading     bool  // first page of a search in flight
@@ -157,7 +158,7 @@ func New(client *github.Client, query string) Model {
 	actionTI := textinput.New()
 
 	spin := spinner.New(spinner.WithSpinner(spinner.MiniDot))
-	prog := progress.New(progress.WithDefaultGradient())
+	prog := progress.New(progress.WithDefaultBlend())
 
 	return Model{
 		client:      client,
@@ -169,7 +170,7 @@ func New(client *github.Client, query string) Model {
 		table:       tableModel,
 		filterInput: filterTI,
 		actionInput: actionTI,
-		pane:        viewport.New(0, 0),
+		pane:        viewport.New(),
 		selected:    map[prKey]bool{},
 		cache:       map[string]results{},
 		loading:     true,
@@ -181,6 +182,19 @@ func New(client *github.Client, query string) Model {
 // WithHistory records every query run from the filter bar or a tab into h.
 func (m Model) WithHistory(h *history.Log) Model {
 	m.history = h
+
+	return m
+}
+
+// WithMouse enables mouse wheel scrolling: the terminal then needs shift to
+// select text. Mouse mode is a per-render View field in bubbletea v2, so it's
+// stored on the model instead of a tea.ProgramOption.
+func (m Model) WithMouse(enabled bool) Model {
+	if enabled {
+		m.mouseMode = tea.MouseModeCellMotion
+	} else {
+		m.mouseMode = tea.MouseModeNone
+	}
 
 	return m
 }

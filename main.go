@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"os"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/hugoh/gh-bulk-pr/internal/github"
 	"github.com/hugoh/gh-bulk-pr/internal/history"
 	"github.com/hugoh/gh-bulk-pr/internal/ui"
@@ -43,14 +43,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	model := ui.New(client, *query).WithHistory(history.New(history.DefaultPath()))
+	model := ui.New(client, *query).
+		WithHistory(history.New(history.DefaultPath())).
+		WithMouse(*mouse)
 
-	options := []tea.ProgramOption{tea.WithAltScreen()}
-	if *mouse {
-		options = append(options, tea.WithMouseCellMotion())
-	}
-
-	if _, err := tea.NewProgram(model, options...).Run(); err != nil {
+	if _, err := tea.NewProgram(model).Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "gh-bulk-pr:", err)
 		os.Exit(1)
 	}

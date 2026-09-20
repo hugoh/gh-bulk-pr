@@ -1,6 +1,6 @@
 package ui
 
-import "github.com/charmbracelet/bubbles/key"
+import "charm.land/bubbles/v2/key"
 
 // keyMap is every key the list screen responds to, with its help text: the
 // footer and the "?" screen are generated from it. Up/Down/Top/Bottom/Page*
@@ -26,7 +26,7 @@ func newKeyMap() keyMap {
 		Bottom:    binding("G/end", "bottom", "G", "end"),
 		PageUp:    binding("pgup/b", "page up", "pgup", "b"),
 		PageDown:  binding("pgdn/f", "page down", "pgdown", "f"),
-		Select:    binding("x/space", "select", "x", " "),
+		Select:    binding("x/space", "select", "x", "space"),
 		SelectAll: binding("ctrl+a", "select all", "ctrl+a"),
 		Clear:     binding("esc", "close/clear", keyEsc),
 		Preview:   binding("enter/p", "preview", keyEnter, "p"),

@@ -6,10 +6,10 @@ import (
 	"slices"
 	"sync/atomic"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/table"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/table"
+	tea "charm.land/bubbletea/v2"
 	"github.com/hugoh/gh-bulk-pr/internal/github"
 )
 
@@ -53,10 +53,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		return m, cmd
 
-	case tea.MouseMsg:
+	case tea.MouseWheelMsg:
 		return m.handleMouse(msg)
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		return m.handleKey(msg)
 	}
 
@@ -93,11 +93,11 @@ const wheelStep = 3
 // wheelDelta is the cursor movement for a wheel button: rows down, negative
 // for up, 0 for any other button.
 func wheelDelta(button tea.MouseButton) int {
-	if button == tea.MouseButtonWheelUp {
+	if button == tea.MouseWheelUp {
 		return -wheelStep
 	}
 
-	if button == tea.MouseButtonWheelDown {
+	if button == tea.MouseWheelDown {
 		return wheelStep
 	}
 
@@ -106,11 +106,7 @@ func wheelDelta(button tea.MouseButton) int {
 
 // handleMouse scrolls with the wheel (only when started with --mouse): the
 // list cursor, or the confirm/results pane. Everything else is ignored.
-func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
-	if msg.Action != tea.MouseActionPress {
-		return m, nil
-	}
-
+func (m Model) handleMouse(msg tea.MouseWheelMsg) (Model, tea.Cmd) {
 	if m.screen == screenConfirm {
 		return m.scrollPane(msg, m.confirmBody()), nil
 	}
@@ -155,10 +151,10 @@ const (
 func (m Model) handleResize(msg tea.WindowSizeMsg) Model {
 	m.width, m.height = msg.Width, msg.Height
 	m.table.SetWidth(m.width)
-	m.pane.Width = m.width
-	m.filterInput.Width = max(m.width-promptInputMargin, minInputWidth)
-	m.actionInput.Width = max(m.width-promptInputMargin, minInputWidth)
-	m.pane.Height = max(m.height-paneChrome, 1)
+	m.pane.SetWidth(m.width)
+	m.filterInput.SetWidth(max(m.width-promptInputMargin, minInputWidth))
+	m.actionInput.SetWidth(max(m.width-promptInputMargin, minInputWidth))
+	m.pane.SetHeight(max(m.height-paneChrome, 1))
 	m.table.SetColumns(columnsForWidth(m.width))
 	m = m.syncTableHeight()
 
@@ -332,7 +328,7 @@ func survivingSelection(selected map[prKey]bool, prs []github.PR) map[prKey]bool
 	return kept
 }
 
-func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+func (m Model) handleKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	if msg.String() == keyCtrlC {
 		return m, tea.Quit
 	}
@@ -357,7 +353,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) handleResultsKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+func (m Model) handleResultsKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	if m.results == nil {
 		return m, nil // still running; only ctrl+c (handled in Update) leaves
 	}
@@ -418,7 +414,7 @@ func (m Model) runQuery(query string) (Model, tea.Cmd) {
 	return m, tea.Batch(m.recordQuery(query), search)
 }
 
-func (m Model) handleListKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+func (m Model) handleListKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	keys := m.keys
 	armed, openArmed := m.quitArmed, m.openArmed
 	m.quitArmed, m.openArmed, m.notice = false, false, ""
@@ -504,7 +500,7 @@ func (m Model) openSelected(armed bool) (Model, tea.Cmd) {
 	return m, m.openAll(urls)
 }
 
-func (m Model) handleCommandKey(msg tea.KeyMsg, openArmed bool) (Model, tea.Cmd) {
+func (m Model) handleCommandKey(msg tea.KeyPressMsg, openArmed bool) (Model, tea.Cmd) {
 	pressed := msg.String()
 
 	switch {
@@ -589,7 +585,7 @@ func (m Model) startAction(actionKey string) (Model, tea.Cmd) {
 	return m.enterConfirm(), nil
 }
 
-func (m Model) handleFilterKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+func (m Model) handleFilterKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	switch msg.String() {
 	case keyEnter:
 		m.filterInput.Blur()
@@ -640,7 +636,7 @@ func (m Model) recallHistory(step int) Model {
 	return m
 }
 
-func (m Model) handleActionInputKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+func (m Model) handleActionInputKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	switch msg.String() {
 	case keyEnter:
 		input := m.actionInput.Value()
@@ -675,7 +671,7 @@ func (m Model) enterConfirm() Model {
 func (m Model) scrollPane(msg tea.Msg, body string) Model {
 	m.pane.SetContent(body)
 
-	if pressed, isKey := msg.(tea.KeyMsg); isKey {
+	if pressed, isKey := msg.(tea.KeyPressMsg); isKey {
 		switch pressed.String() {
 		case "g", "home":
 			m.pane.GotoTop()
@@ -693,7 +689,7 @@ func (m Model) scrollPane(msg tea.Msg, body string) Model {
 	return m
 }
 
-func (m Model) handleConfirmKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+func (m Model) handleConfirmKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	switch pressed := msg.String(); {
 	case pressed == "y" || (pressed == keyEnter && !m.action.destructive):
 		m.screen = screenResults
