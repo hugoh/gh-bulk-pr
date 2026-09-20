@@ -149,6 +149,7 @@ func New(client *github.Client, query string) Model {
 		table.WithFocused(true),
 		table.WithKeyMap(keyMap),
 		table.WithHeight(defaultTableHeight),
+		table.WithStyles(tableStyles()),
 	)
 
 	filterTI := textinput.New()
@@ -157,8 +158,8 @@ func New(client *github.Client, query string) Model {
 
 	actionTI := textinput.New()
 
-	spin := spinner.New(spinner.WithSpinner(spinner.MiniDot))
-	prog := progress.New(progress.WithDefaultBlend())
+	spin := spinner.New(spinner.WithSpinner(spinner.MiniDot), spinner.WithStyle(fg(colorAccent())))
+	prog := progress.New(progress.WithColors(colorAccent(), colorInfo()))
 
 	return Model{
 		client:      client,
@@ -206,6 +207,7 @@ func (m Model) Init() tea.Cmd {
 
 func newHelp() help.Model {
 	h := help.New()
+	h.Styles = helpStyles()
 	h.ShortSeparator = " · "
 
 	return h

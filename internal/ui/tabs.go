@@ -43,7 +43,7 @@ func (m Model) tabBar() string {
 	for i, tab := range tabs() {
 		label := strconv.Itoa(i+1) + " " + tab.name
 		if i == m.tab {
-			parts[i] = headerStyle().Reverse(true).Render(" " + label + " ")
+			parts[i] = activeTabStyle().Render(" " + label + " ")
 		} else {
 			parts[i] = helpStyle().Render(" " + label + " ")
 		}

@@ -10,7 +10,6 @@ import (
 	"charm.land/bubbles/v2/table"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"charm.land/lipgloss/v2/compat"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/hugoh/gh-bulk-pr/internal/github"
 	"github.com/hugoh/gh-bulk-pr/internal/worker"
@@ -25,30 +24,6 @@ const (
 	labelConflict    = "conflict"
 	labelBlocked     = "blocked"
 )
-
-// adaptive is a colour that reads on both light and dark terminal backgrounds.
-func adaptive(light, dark string) compat.AdaptiveColor {
-	return compat.AdaptiveColor{Light: lipgloss.Color(light), Dark: lipgloss.Color(dark)}
-}
-
-func fg(light, dark string) lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(adaptive(light, dark))
-}
-
-func helpStyle() lipgloss.Style            { return fg("243", "241") }
-func errStyle() lipgloss.Style             { return fg("160", "196") }
-func okStyle() lipgloss.Style              { return fg("28", "42") }
-func headerStyle() lipgloss.Style          { return lipgloss.NewStyle().Bold(true) }
-func separatorStyle() lipgloss.Style       { return fg("250", "240") }
-func footerStyle() lipgloss.Style          { return helpStyle().Padding(0, 1) }
-func previewTitleStyle() lipgloss.Style    { return lipgloss.NewStyle().Bold(true) }
-func previewMetaStyle() lipgloss.Style     { return helpStyle() }
-func previewLabelStyle() lipgloss.Style    { return fg("166", "214") }
-func previewReviewerStyle() lipgloss.Style { return fg("27", "39") }
-
-func previewBoxStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Padding(0, 1)
-}
 
 func prNumber(n int) string { return "#" + strconv.Itoa(n) }
 
@@ -113,9 +88,15 @@ func mergeSummary(prs []github.PR) string {
 // selectedRowPrefix is the escape sequence the table opens the cursor row with,
 // or "" when colors are off.
 func selectedRowPrefix() string {
-	prefix, _, _ := strings.Cut(table.DefaultStyles().Selected.Render("|"), "|")
+	prefix, _, _ := strings.Cut(tableStyles().Selected.Render("|"), "|")
 
 	return prefix
+}
+
+// onCursor gives style the cursor row's background, so a colored cell doesn't
+// punch a hole in the highlight.
+func onCursor(style lipgloss.Style) lipgloss.Style {
+	return style.Inherit(tableStyles().Selected)
 }
 
 func mergeStyle(label string) lipgloss.Style {
@@ -162,14 +143,14 @@ func colorMerge(rendered string, cols []table.Column) string {
 			continue
 		}
 
-		restore := ""
+		restore, style := "", mergeStyle(cell)
 		if sel != "" && strings.HasPrefix(line, sel) {
-			restore = sel
+			restore, style = sel, onCursor(style)
 		}
 
 		pad := strings.Repeat(" ", max(width-lipgloss.Width(cell), 0))
 		lines[idx] = ansi.Truncate(line, start, "") +
-			mergeStyle(cell).Render(cell) + restore + pad +
+			style.Render(cell) + restore + pad +
 			ansi.TruncateLeft(line, start+width, "")
 	}
 
@@ -182,16 +163,15 @@ func colorMerge(rendered string, cols []table.Column) string {
 // the highlight is re-opened after each glyph.
 func colorChecks(rendered string) string {
 	sel := selectedRowPrefix()
-	passGlyph, failGlyph := okStyle().Render("✓"), errStyle().Render("✗")
 
 	lines := strings.Split(rendered, "\n")
 	for idx, line := range lines {
-		restore := ""
+		pass, fail, restore := okStyle(), errStyle(), ""
 		if sel != "" && strings.HasPrefix(line, sel) {
-			restore = sel
+			pass, fail, restore = onCursor(pass), onCursor(fail), sel
 		}
 
-		lines[idx] = strings.NewReplacer("✓", passGlyph+restore, "✗", failGlyph+restore).
+		lines[idx] = strings.NewReplacer("✓", pass.Render("✓")+restore, "✗", fail.Render("✗")+restore).
 			Replace(line)
 	}
 
