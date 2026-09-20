@@ -444,7 +444,8 @@ func (m Model) handleListKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	case key.Matches(msg, keys.Refresh):
 		return m.reload()
 	case key.Matches(
-		msg, keys.Checks, keys.Open, keys.OpenAll, keys.Tab, keys.Label, keys.Close, keys.Merge, keys.AutoMerge,
+		msg, keys.Checks, keys.Open, keys.OpenAll, keys.State, keys.Tab,
+		keys.Label, keys.Close, keys.Merge, keys.AutoMerge,
 	):
 		return m.handleCommandKey(msg, openArmed)
 	}
@@ -514,11 +515,36 @@ func (m Model) handleCommandKey(msg tea.KeyPressMsg, openArmed bool) (Model, tea
 		return m, m.openFocused()
 	case key.Matches(msg, m.keys.OpenAll):
 		return m.openSelected(openArmed)
+	case key.Matches(msg, m.keys.State):
+		return m.toggleState()
 	case key.Matches(msg, m.keys.Tab):
-		return m.runQuery(tabs()[int(pressed[0]-'1')].query)
+		return m.runQuery(m.tabQuery(int(pressed[0] - '1')))
 	default:
 		return m.startAction(pressed)
 	}
+}
+
+// toggleState flips the current query between is:open and is:closed.
+func (m Model) toggleState() (Model, tea.Cmd) {
+	query, ok := flipState(m.query)
+	if !ok {
+		m.notice = "the query has no " + stateOpen + " or " + stateClosed + " to toggle"
+
+		return m, nil
+	}
+
+	return m.runQuery(query)
+}
+
+// tabQuery is tab idx's query, closed if the current query is, so switching
+// tabs doesn't silently go back to open PRs.
+func (m Model) tabQuery(idx int) string {
+	query := tabs()[idx].query
+	if isClosed(m.query) {
+		query, _ = flipState(query)
+	}
+
+	return query
 }
 
 func (m Model) startFilter() (Model, tea.Cmd) {

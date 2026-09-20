@@ -38,6 +38,7 @@ Press `?` in the app for this list.
 | `esc` | close/clear |
 | `enter/p` | preview |
 | `/` | filter |
+| `s` | open/closed |
 | `1/2` | tab |
 | `r` | refresh |
 | `T` | checks |

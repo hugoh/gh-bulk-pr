@@ -11,6 +11,7 @@ import (
 
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/hugoh/gh-bulk-pr/internal/github"
 	"github.com/hugoh/gh-bulk-pr/internal/history"
 	"github.com/hugoh/gh-bulk-pr/internal/worker"
@@ -773,6 +774,94 @@ func TestHandleListKey_ToggleSelection_SameNumberInDifferentRepos(t *testing.T) 
 	got := m.selectedPRs()
 	require.Len(t, got, 1)
 	assert.Equal(t, testRepoA, got[0].Repo)
+}
+
+func TestFlipState(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		query  string
+		want   string
+		wantOK bool
+	}{
+		"open to closed":   {"is:open is:pr owner:@me", "is:closed is:pr owner:@me", true},
+		"closed to open":   {"is:closed is:pr owner:@me", "is:open is:pr owner:@me", true},
+		"extra whitespace": {"is:pr  is:open", "is:pr is:closed", true},
+		"no state":         {"is:pr owner:@me", "is:pr owner:@me", false},
+		"substring only":   {"is:pr label:is:opened", "is:pr label:is:opened", false},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got, ok := flipState(tt.query)
+			require.Equal(t, tt.wantOK, ok)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestTabFor_IgnoresOpenOrClosed(t *testing.T) {
+	t.Parallel()
+
+	closed, ok := flipState(tabs()[1].query)
+	require.True(t, ok)
+	assert.Equal(t, 1, tabFor(closed))
+}
+
+func TestTabBar_MarksTheActiveTabClosed(t *testing.T) {
+	t.Parallel()
+
+	open := New(nil, tabs()[0].query)
+	assert.NotContains(t, ansi.Strip(open.tabBar()), "(closed)")
+
+	closedQuery, _ := flipState(tabs()[0].query)
+	closed := New(nil, closedQuery)
+
+	bar := ansi.Strip(closed.tabBar())
+	assert.Equal(t, 1, strings.Count(bar, "(closed)"), "only the active tab says so")
+	assert.Contains(t, bar, tabs()[0].name+" (closed)")
+}
+
+func TestListKey_ToggleState(t *testing.T) {
+	t.Parallel()
+
+	m := loadedModel()
+	start := m.query
+
+	m, cmd := m.handleListKeyByString("s")
+	assert.Contains(t, m.query, "is:closed")
+	assert.NotContains(t, m.query, "is:open")
+	assert.True(t, m.loading)
+	require.NotNil(t, cmd)
+
+	m, _ = m.handleListKeyByString("s")
+	assert.Equal(t, start, m.query)
+}
+
+func TestListKey_ToggleState_WithoutStateSaysSo(t *testing.T) {
+	t.Parallel()
+
+	m := New(nil, "is:pr author:hugoh")
+	m = m.handleResize(tea.WindowSizeMsg{Width: 100, Height: 30})
+
+	m, cmd := m.handleListKeyByString("s")
+	assert.Equal(t, "is:pr author:hugoh", m.query)
+	assert.Contains(t, m.statusLine(), "is:open")
+	assert.Nil(t, cmd)
+}
+
+func TestListKey_TabKeepsClosedState(t *testing.T) {
+	t.Parallel()
+
+	m := loadedModel()
+	m, _ = m.handleListKeyByString("s")
+	m, _ = m.handleListKeyByString("2")
+
+	assert.Equal(t, 1, m.tab)
+	assert.Contains(t, m.query, "is:closed")
+	assert.Contains(t, m.query, "involves:@me")
 }
 
 func TestTabs(t *testing.T) {
