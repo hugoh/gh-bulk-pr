@@ -81,6 +81,12 @@ type Model struct {
 	searchID int // identifies the latest search; older results are dropped
 	cancel   context.CancelFunc
 
+	details   map[string]github.Detail // last known details by PR ID; kept across refreshes
+	fetched   map[string]fetchState    // per PR ID, for the current search only
+	fetching  int                      // details requests in flight
+	detailCtx context.Context          //nolint:containedctx // ends with the search, like cancel
+	detailErr error                    // last failure loading details; the rows stay usable
+
 	cancelMore context.CancelFunc // stops the further page being fetched, if any
 
 	open        func(url string) error // opens a URL in the browser; replaced in tests
@@ -170,6 +176,9 @@ func New(client *github.Client, query string) Model {
 		pane:        viewport.New(),
 		selected:    map[prKey]bool{},
 		cache:       map[string]github.Page{},
+		details:     map[string]github.Detail{},
+		fetched:     map[string]fetchState{},
+		detailCtx:   context.Background(),
 		loading:     true,
 		spinner:     spin,
 		progress:    prog,

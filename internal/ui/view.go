@@ -360,6 +360,10 @@ func (m Model) statusLine() string {
 		parts = append(parts, errStyle().Render("load more failed: "+m.moreErr.Error()))
 	}
 
+	if m.detailErr != nil {
+		parts = append(parts, errStyle().Render("load details failed: "+m.detailErr.Error()))
+	}
+
 	if m.notice != "" {
 		parts = append(parts, errStyle().Render(m.notice))
 	}

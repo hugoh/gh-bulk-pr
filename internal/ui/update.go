@@ -30,30 +30,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		return m.handleResize(msg), nil
 	case searchDoneMsg:
-		return m.handleSearchDone(msg), nil
+		return m.handleSearchDone(msg).fetchDetails()
+	case detailsDoneMsg:
+		return m.handleDetailsDone(msg)
 	case modelMsg:
 		return msg.applyTo(m), nil
 	case actionDoneMsg:
-		m.results = msg.results
-		m = m.applyOnDone(msg.results)
-		m.screen = screenResults
-		m.pane.GotoTop()
-
-		return m, nil
+		return m.handleActionDone(msg), nil
 
 	case actionProgressMsg:
 		return m.handleActionProgress()
 
 	case spinner.TickMsg:
-		if !m.spinnerActive() {
-			return m, nil
-		}
-
-		var cmd tea.Cmd
-
-		m.spinner, cmd = m.spinner.Update(msg)
-
-		return m, cmd
+		return m.handleSpinnerTick(msg)
 
 	case tea.MouseWheelMsg:
 		return m.handleMouse(msg)
@@ -63,6 +52,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+func (m Model) handleSpinnerTick(msg spinner.TickMsg) (Model, tea.Cmd) {
+	if !m.spinnerActive() {
+		return m, nil
+	}
+
+	var cmd tea.Cmd
+
+	m.spinner, cmd = m.spinner.Update(msg)
+
+	return m, cmd
+}
+
+func (m Model) handleActionDone(msg actionDoneMsg) Model {
+	m.results = msg.results
+	m = m.applyOnDone(msg.results)
+	m.screen = screenResults
+	m.pane.GotoTop()
+
+	return m
 }
 
 // modelMsg is a message that only updates the model, with no command to run.
@@ -132,7 +142,7 @@ func (m Model) handleMouse(msg tea.MouseWheelMsg) (Model, tea.Cmd) {
 		m.table.MoveDown(delta)
 	}
 
-	return m.maybeLoadMore()
+	return m.followCursor()
 }
 
 func (m Model) spinnerActive() bool {
@@ -196,10 +206,7 @@ func (m Model) handleSearchDone(msg searchDoneMsg) Model {
 		return m
 	}
 
-	switch {
-	case msg.light:
-		return m.handleLightDone(msg)
-	case msg.more:
+	if msg.more {
 		return m.handleMoreDone(msg)
 	}
 
@@ -208,33 +215,13 @@ func (m Model) handleSearchDone(msg searchDoneMsg) Model {
 
 	if msg.err == nil {
 		m.prs = msg.PRs
+		m = m.withStoredDetails()
 		m.selected = survivingSelection(m.selected, m.prs)
 		m = m.storePaging(msg)
 		m = m.refreshRows()
 	}
 
 	return m
-}
-
-// handleLightDone merges the first-pass rows into the list; it never
-// replaces detailed rows, and its errors are left for the full search to report.
-func (m Model) handleLightDone(msg searchDoneMsg) Model {
-	pending := m.loading
-	if msg.more {
-		pending = m.loadingMore
-	}
-
-	// Once the full result for this page has landed the light one has nothing
-	// to add, and any row it would append that the full page lacks (a PR
-	// updated in between) would stay a placeholder.
-	if msg.err != nil || !pending {
-		return m
-	}
-
-	m.total = msg.Total
-	m.prs = mergePRs(m.prs, msg.PRs)
-
-	return m.refreshRows()
 }
 
 func (m Model) handleMoreDone(msg searchDoneMsg) Model {
@@ -245,19 +232,16 @@ func (m Model) handleMoreDone(msg searchDoneMsg) Model {
 		m.cancelMore = nil
 	}
 
-	// Rows still lacking details belong to this page's light result. Whatever
-	// the full result didn't confirm (or all of them, if it failed) goes; a
-	// retry fetches the page again.
-	if msg.err == nil {
-		m.moreErr = nil
-		m.prs = mergePRs(m.prs, msg.PRs)
-		m = m.storePaging(msg)
-	} else {
+	if msg.err != nil {
 		m.moreErr = msg.err
+
+		return m
 	}
 
-	m.prs = slices.DeleteFunc(m.prs, func(pr github.PR) bool { return !pr.Detailed })
-	m.selected = survivingSelection(m.selected, m.prs)
+	m.moreErr = nil
+	m.prs = appendNew(m.prs, msg.PRs)
+	m = m.withStoredDetails()
+	m = m.storePaging(msg)
 
 	return m.refreshRows()
 }
@@ -274,32 +258,6 @@ func (m Model) storePaging(msg searchDoneMsg) Model {
 	}
 
 	return m
-}
-
-// mergePRs adds incoming to prs by identity: new PRs are appended, known ones
-// updated in place, except that a light row never replaces a detailed one.
-// prs is not modified; it may be shared with the cache.
-func mergePRs(prs, incoming []github.PR) []github.PR {
-	merged := slices.Clone(prs)
-	index := make(map[prKey]int, len(merged))
-
-	for pos, existing := range merged {
-		index[keyOf(existing)] = pos
-	}
-
-	for _, fresh := range incoming {
-		pos, known := index[keyOf(fresh)]
-
-		switch {
-		case !known:
-			index[keyOf(fresh)] = len(merged)
-			merged = append(merged, fresh)
-		case fresh.Detailed || !merged[pos].Detailed:
-			merged[pos] = fresh
-		}
-	}
-
-	return merged
 }
 
 // maybeLoadMore fetches the next page once the cursor is within
@@ -387,6 +345,10 @@ func (m Model) reload() (Model, tea.Cmd) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	m.cancel = cancel
+	m.detailCtx = ctx
+	m.fetched = map[string]fetchState{}
+	m.fetching = 0
+	m.detailErr = nil
 	m.searchID++
 	m.loading = true
 	m.loadingMore = false
@@ -399,7 +361,7 @@ func (m Model) reload() (Model, tea.Cmd) {
 func (m Model) withResults(page github.Page) Model {
 	m.prs, m.total, m.endCursor, m.hasMore = page.PRs, page.Total, page.EndCursor, page.HasNext
 
-	return m
+	return m.withStoredDetails()
 }
 
 // runQuery makes query current, selecting the tab it matches (if any),
@@ -453,9 +415,9 @@ func (m Model) handleListKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	var cmd tea.Cmd
 
 	m.table, cmd = m.table.Update(msg)
-	m, more := m.maybeLoadMore()
+	m, follow := m.followCursor()
 
-	return m, tea.Batch(cmd, more)
+	return m, tea.Batch(cmd, follow)
 }
 
 // requestQuit quits at once, unless PRs are selected: then the first q asks

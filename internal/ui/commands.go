@@ -16,14 +16,12 @@ import (
 const progressPollInterval = 150 * time.Millisecond
 
 // searchDoneMsg carries one page of search results. id and query say which
-// search it answers; light marks the fast pass that lacks checks and merge
-// state, and more marks a page after the first.
+// search it answers, and more marks a page after the first.
 type searchDoneMsg struct {
 	github.Page
 
 	id    int
 	query string
-	light bool
 	more  bool
 	err   error
 }
@@ -39,42 +37,24 @@ type actionDoneMsg struct {
 
 type actionProgressMsg struct{}
 
-// searchCmds runs the full search for the first page and, when there are no
-// rows to show yet, a light one alongside it so the list paints sooner. Both
-// stop with ctx.
+// searchCmds fetches the first page of results. Its rows arrive without
+// details, which fetchDetails asks for as they land. It stops with ctx.
 func (m Model) searchCmds(ctx context.Context) tea.Cmd {
-	cmds := []tea.Cmd{m.spinner.Tick, m.runSearch(ctx, false, "", false)}
-	if len(m.prs) == 0 {
-		cmds = append(cmds, m.runSearch(ctx, true, "", false))
-	}
-
-	return tea.Batch(cmds...)
+	return tea.Batch(m.spinner.Tick, m.runSearch(ctx, "", false))
 }
 
-// moreCmds fetches the page after m.endCursor, light and full at once: its
-// rows aren't on screen yet. Both stop with ctx.
+// moreCmds fetches the page after m.endCursor. It stops with ctx.
 func (m Model) moreCmds(ctx context.Context) tea.Cmd {
-	return tea.Batch(
-		m.spinner.Tick,
-		m.runSearch(ctx, false, m.endCursor, true),
-		m.runSearch(ctx, true, m.endCursor, true),
-	)
+	return tea.Batch(m.spinner.Tick, m.runSearch(ctx, m.endCursor, true))
 }
 
-func (m Model) runSearch(ctx context.Context, light bool, after string, more bool) tea.Cmd {
+func (m Model) runSearch(ctx context.Context, after string, more bool) tea.Cmd {
 	client, query, searchID := m.client, m.query, m.searchID
 
 	return func() tea.Msg {
-		page, err := client.SearchPage(ctx, query, after, light)
+		page, err := client.SearchPage(ctx, query, after)
 
-		return searchDoneMsg{
-			Page:  page,
-			id:    searchID,
-			query: query,
-			light: light,
-			more:  more,
-			err:   err,
-		}
+		return searchDoneMsg{Page: page, id: searchID, query: query, more: more, err: err}
 	}
 }
 

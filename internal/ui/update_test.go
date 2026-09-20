@@ -1085,37 +1085,6 @@ func TestFinishingActionForcesFullReload(t *testing.T) {
 	assert.True(t, m.loading)
 }
 
-func TestLightSearchThenFull(t *testing.T) {
-	t.Parallel()
-
-	light := []github.PR{{Number: 1, Title: "Fix bug", Repo: testRepoA, Author: testAuthor}}
-
-	m := New(nil, "q")
-
-	m = m.handleSearchDone(searchDoneMsg{PRs: light, light: true})
-	assert.Equal(t, light, m.prs, "light result paints the list")
-	assert.True(t, m.loading, "still waiting for the full result")
-	assert.Equal(t, "…", m.table.Rows()[0][4], "checks column is a placeholder until details land")
-	assert.Equal(t, "…", m.table.Rows()[0][5], "merge column is a placeholder until details land")
-
-	m = m.handleSearchDone(searchDoneMsg{PRs: testPRs()})
-	assert.Equal(t, testPRs(), m.prs)
-	assert.False(t, m.loading)
-
-	m = m.handleSearchDone(searchDoneMsg{PRs: light, light: true})
-	assert.Equal(t, testPRs(), m.prs, "late light result must not clobber the full one")
-}
-
-func TestLightSearchErrorIsIgnored(t *testing.T) {
-	t.Parallel()
-
-	m := New(nil, "q")
-	m = m.handleSearchDone(searchDoneMsg{light: true, err: assert.AnError})
-
-	require.NoError(t, m.err)
-	assert.True(t, m.loading)
-}
-
 func TestReloadKeepsRows(t *testing.T) {
 	t.Parallel()
 
@@ -1130,6 +1099,7 @@ func manyPRs(first, count int, detailed bool) []github.PR {
 	prs := make([]github.PR, count)
 	for i := range prs {
 		prs[i] = github.PR{
+			ID:       idOf(first + i),
 			Number:   first + i,
 			Title:    "PR",
 			Repo:     testRepoA,
@@ -1154,18 +1124,6 @@ func pagedModel() Model {
 	})
 }
 
-func lightNextPageModel(t *testing.T) Model {
-	t.Helper()
-
-	m := pagedModel()
-	m.loadingMore = true
-
-	m = m.handleSearchDone(searchDoneMsg{PRs: manyPRs(51, 50, false), light: true, more: true})
-	require.Len(t, m.prs, 100)
-
-	return m
-}
-
 func TestFullPageStoresPaging(t *testing.T) {
 	t.Parallel()
 
@@ -1179,78 +1137,6 @@ func TestFullPageStoresPaging(t *testing.T) {
 		github.Page{PRs: m.prs, Total: 312, EndCursor: "c1", HasNext: true},
 		m.cache["q"],
 	)
-}
-
-func TestLightPageSetsTotalOnly(t *testing.T) {
-	t.Parallel()
-
-	m := New(nil, "q").handleSearchDone(searchDoneMsg{
-		PRs: manyPRs(1, 3, false), Total: 312, EndCursor: "c1", HasNext: true,
-		light: true,
-	})
-
-	assert.Equal(t, 312, m.total)
-	assert.False(t, m.hasMore, "only the full result decides whether more can be loaded")
-	assert.Empty(t, m.endCursor)
-	assert.NotContains(t, m.cache, "q", "light rows are never cached")
-}
-
-func TestLightNeverOverwritesDetailedRow(t *testing.T) {
-	t.Parallel()
-
-	m := pagedModel()
-	m = m.handleSearchDone(searchDoneMsg{PRs: manyPRs(1, 1, false), light: true})
-
-	assert.True(t, m.prs[0].Detailed)
-	assert.Equal(t, github.ChecksPass, m.prs[0].Checks)
-	assert.Len(t, m.prs, 50)
-}
-
-func TestLoadMore_LightThenFull(t *testing.T) {
-	t.Parallel()
-
-	m := pagedModel()
-	m.loadingMore = true
-
-	m = m.handleSearchDone(
-		searchDoneMsg{PRs: manyPRs(51, 50, false), Total: 312, light: true, more: true},
-	)
-	assert.Len(t, m.prs, 100, "light rows are appended right away")
-	assert.Equal(t, "…", m.table.Rows()[50][4])
-	assert.True(t, m.loadingMore, "still waiting for the full page")
-
-	m = m.handleSearchDone(
-		searchDoneMsg{
-			PRs:       manyPRs(51, 50, true),
-			Total:     312,
-			EndCursor: "c2",
-			query:     "q",
-			more:      true,
-		},
-	)
-	assert.Len(t, m.prs, 100, "full rows replace the light ones in place")
-	assert.True(t, m.prs[99].Detailed)
-	assert.NotEqual(t, "…", m.table.Rows()[50][4])
-	assert.False(t, m.loadingMore)
-	assert.Equal(t, "c2", m.endCursor)
-	assert.False(t, m.hasMore)
-	assert.Len(t, m.cache["q"].PRs, 100)
-	assert.Equal(t, "c2", m.cache["q"].EndCursor)
-}
-
-func TestLoadMore_FullBeforeLight(t *testing.T) {
-	t.Parallel()
-
-	m := pagedModel()
-	m.loadingMore = true
-
-	m = m.handleSearchDone(
-		searchDoneMsg{PRs: manyPRs(51, 50, true), EndCursor: "c2", HasNext: true, more: true},
-	)
-	m = m.handleSearchDone(searchDoneMsg{PRs: manyPRs(51, 50, false), light: true, more: true})
-
-	assert.Len(t, m.prs, 100)
-	assert.True(t, m.prs[99].Detailed, "late light page must not downgrade rows")
 }
 
 func TestLoadMore_DedupesShiftedResults(t *testing.T) {
@@ -1530,62 +1416,6 @@ func TestFinishedMorePageReleasesItsContext(t *testing.T) {
 
 	assert.True(t, released)
 	assert.Nil(t, m.cancelMore)
-}
-
-func TestLoadMore_FullDropsLightRowsItDidNotReturn(t *testing.T) {
-	t.Parallel()
-
-	m := lightNextPageModel(t)
-
-	// PR 100 was updated between the two calls and slid off this page; 101 slid on.
-	full := append(manyPRs(51, 49, true), manyPRs(101, 1, true)...)
-	m = m.handleSearchDone(
-		searchDoneMsg{PRs: full, EndCursor: "c2", HasNext: true, query: "q", more: true},
-	)
-
-	assert.Len(t, m.prs, 100)
-
-	for _, pr := range m.prs {
-		assert.True(t, pr.Detailed, "PR %d must not be left as a placeholder row", pr.Number)
-		assert.NotEqual(t, 100, pr.Number)
-	}
-
-	assert.Equal(t, 101, m.prs[99].Number)
-}
-
-func TestLoadMore_LightAfterFullIsIgnored(t *testing.T) {
-	t.Parallel()
-
-	m := pagedModel()
-	m.loadingMore = true
-
-	m = m.handleSearchDone(searchDoneMsg{PRs: manyPRs(51, 10, true), query: "q", more: true})
-	m = m.handleSearchDone(searchDoneMsg{PRs: manyPRs(51, 12, false), light: true, more: true})
-
-	assert.Len(t, m.prs, 60, "the light page has nothing left to add once the full one landed")
-}
-
-func TestLightPageOneAfterFullIsIgnored(t *testing.T) {
-	t.Parallel()
-
-	m := pagedModel()
-	m = m.handleSearchDone(searchDoneMsg{PRs: manyPRs(1, 51, false), light: true})
-
-	assert.Len(t, m.prs, 50)
-}
-
-func TestLoadMore_FailedPageDropsItsPlaceholders(t *testing.T) {
-	t.Parallel()
-
-	m := lightNextPageModel(t)
-	m.selected[keyOf(m.prs[75])] = true
-
-	m = m.handleSearchDone(searchDoneMsg{more: true, err: assert.AnError})
-
-	assert.Len(t, m.prs, 50, "the failed page's rows go; a retry fetches them again")
-	assert.Empty(t, m.selected, "selection can't point at rows that are gone")
-	require.ErrorIs(t, m.moreErr, assert.AnError)
-	assert.Len(t, m.table.Rows(), 50)
 }
 
 func TestQuitWithASelectionNeedsASecondPress(t *testing.T) {
@@ -1941,4 +1771,35 @@ func TestNew_HasARealBrowserByDefault(t *testing.T) {
 	t.Parallel()
 
 	require.NotNil(t, New(nil, "q").open)
+}
+
+func TestLoadMore_AppendsThePageAndCachesIt(t *testing.T) {
+	t.Parallel()
+
+	m := pagedModel()
+	m.loadingMore = true
+
+	m = m.handleSearchDone(searchDoneMsg{
+		PRs: manyPRs(51, 50, false), Total: 312, EndCursor: "c2", HasNext: true,
+		query: "q",
+		more:  true,
+	})
+
+	assert.Len(t, m.prs, 100)
+	assert.Equal(t, "…", m.table.Rows()[50][4], "the new rows wait for their details")
+	assert.False(t, m.loadingMore)
+	assert.Equal(t, "c2", m.endCursor)
+	assert.True(t, m.hasMore)
+	assert.Len(t, m.cache["q"].PRs, 100)
+	assert.Equal(t, "c2", m.cache["q"].EndCursor)
+}
+
+func TestSearchDone_ShowsRowsWithPlaceholdersUntilDetailsLand(t *testing.T) {
+	t.Parallel()
+
+	m := New(nil, "q").handleSearchDone(searchDoneMsg{PRs: manyPRs(1, 3, false)})
+
+	assert.False(t, m.loading)
+	assert.Equal(t, "…", m.table.Rows()[0][4])
+	assert.Equal(t, "…", m.table.Rows()[0][5])
 }
