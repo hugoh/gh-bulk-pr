@@ -282,8 +282,6 @@ func (m Model) viewList(footer string) string {
 	var body string
 
 	switch {
-	case m.loading && len(m.prs) == 0:
-		body = header + "\n\n" + m.spinner.View() + " loading…"
 	case m.err != nil:
 		body = header + "\n\n" + errStyle().Render("error: "+m.err.Error())
 	default:
@@ -356,10 +354,10 @@ func (m Model) viewPrompt() string {
 	return m.viewList(lipgloss.NewStyle().Padding(0, 1).Render(line))
 }
 
-// statusLine is the line under the header, right-aligned: how many PRs are
-// selected, the merge summary,
-// the cursor's position in the results, and any background activity. It is empty when
-// there is nothing to say, which keeps the spacer between header and table.
+// statusLine is the line under the header: the loading or refreshing spinner
+// on the left, and on the right how many PRs are selected, the merge summary
+// and the cursor's position in the results. It is empty when there is nothing
+// to say, which keeps the spacer between header and table.
 func (m Model) statusLine() string {
 	var parts []string
 
@@ -368,7 +366,7 @@ func (m Model) statusLine() string {
 	}
 
 	if len(parts) > 0 {
-		return m.alignRight(parts)
+		return m.spread(m.loadingText(), parts)
 	}
 
 	if selected := len(m.selectedPRs()); selected > 0 {
@@ -383,10 +381,6 @@ func (m Model) statusLine() string {
 		parts = append(parts, helpStyle().Render(position))
 	}
 
-	if m.loading {
-		parts = append(parts, m.spinner.View()+helpStyle().Render(" refreshing…"))
-	}
-
 	if m.moreErr != nil {
 		parts = append(parts, errStyle().Render("load more failed: "+m.moreErr.Error()))
 	}
@@ -395,16 +389,35 @@ func (m Model) statusLine() string {
 		parts = append(parts, errStyle().Render(m.notice))
 	}
 
-	return m.alignRight(parts)
+	return m.spread(m.loadingText(), parts)
 }
 
-func (m Model) alignRight(parts []string) string {
-	status := fit(strings.Join(parts, "  "), m.width)
-	if m.width == 0 {
-		return status
+// loadingText is the spinner shown on the left of the status line while a
+// search is in flight: "loading" until there are rows, "refreshing" after.
+func (m Model) loadingText() string {
+	if !m.loading {
+		return ""
 	}
 
-	return lipgloss.PlaceHorizontal(m.width, lipgloss.Right, status)
+	label := " refreshing…"
+	if len(m.prs) == 0 {
+		label = " loading…"
+	}
+
+	return " " + m.spinner.View() + helpStyle().Render(label)
+}
+
+// spread puts left at the left edge and parts, joined, at the right edge.
+func (m Model) spread(left string, parts []string) string {
+	right := strings.Join(parts, "  ")
+	if m.width == 0 {
+		return strings.TrimSpace(left + "  " + right)
+	}
+
+	right = fit(right, max(m.width-lipgloss.Width(left)-1, 0))
+	gap := max(m.width-lipgloss.Width(left)-lipgloss.Width(right), 0)
+
+	return left + strings.Repeat(" ", gap) + right
 }
 
 // positionText is the cursor's place in the full result list, e.g.

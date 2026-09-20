@@ -124,6 +124,18 @@ func TestViewList_Loading(t *testing.T) {
 	assert.Contains(t, m.View().Content, "loading")
 }
 
+func TestViewList_LoadingShowsTableAndLeftSpinner(t *testing.T) {
+	t.Parallel()
+
+	m := New(nil, "is:open is:pr").handleResize(tea.WindowSizeMsg{Width: 100, Height: 30})
+	lines := strings.Split(ansi.Strip(m.View().Content), "\n")
+
+	assert.Contains(t, lines[0], "gh-bulk-pr")
+	assert.True(t, strings.HasPrefix(strings.TrimLeft(lines[1], " "), m.spinner.View()), lines[1])
+	assert.Contains(t, lines[1], "loading…")
+	assert.Contains(t, lines[2], "Title", "table header visible before any rows arrive")
+}
+
 func TestViewList_Error(t *testing.T) {
 	t.Parallel()
 
