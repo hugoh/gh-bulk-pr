@@ -7,8 +7,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/table"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/table"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	"charm.land/lipgloss/v2/compat"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/hugoh/gh-bulk-pr/internal/github"
 	"github.com/hugoh/gh-bulk-pr/internal/worker"
@@ -25,8 +27,8 @@ const (
 )
 
 // adaptive is a colour that reads on both light and dark terminal backgrounds.
-func adaptive(light, dark string) lipgloss.AdaptiveColor {
-	return lipgloss.AdaptiveColor{Light: light, Dark: dark}
+func adaptive(light, dark string) compat.AdaptiveColor {
+	return compat.AdaptiveColor{Light: lipgloss.Color(light), Dark: lipgloss.Color(dark)}
 }
 
 func fg(light, dark string) lipgloss.Style {
@@ -214,9 +216,21 @@ func (m Model) listFits() bool {
 	return m.width == 0 || m.height == 0 || (m.width >= minWidth && m.height >= minHeight)
 }
 
-// View renders the current screen, with every line cut to the terminal width
-// so nothing wraps and throws off the height accounting.
-func (m Model) View() string {
+// View renders the current screen as a tea.View, satisfying tea.Model. The
+// alt screen is always on; mouse mode reflects the --mouse flag (see
+// WithMouse).
+func (m Model) View() tea.View {
+	v := tea.NewView(m.viewString())
+	v.AltScreen = true
+	v.MouseMode = m.mouseMode
+
+	return v
+}
+
+// viewString renders the current screen to a plain string, with every line
+// cut to the terminal width so nothing wraps and throws off the height
+// accounting.
+func (m Model) viewString() string {
 	if m.tooSmall() {
 		return fit(fmt.Sprintf(
 			"terminal too small: need %d×%d, have %d×%d",
@@ -449,7 +463,7 @@ func (m Model) footerText() string {
 
 func (m Model) viewHelp() string {
 	columns := m.help
-	columns.Width = m.width
+	columns.SetWidth(m.width)
 
 	return headerStyle().Render("Keys") + "\n\n" + columns.FullHelpView(m.keys.full()) +
 		"\n\n" + helpStyle().Render("any key to close")
@@ -527,7 +541,7 @@ func (m Model) viewPane(body string) string {
 
 // scrollHint is appended to a prompt when body is taller than the pane.
 func (m Model) scrollHint(body string) string {
-	if m.height > 0 && strings.Count(body, "\n")+1 > m.pane.Height {
+	if m.height > 0 && strings.Count(body, "\n")+1 > m.pane.Height() {
 		return " · j/k/g/G scroll"
 	}
 

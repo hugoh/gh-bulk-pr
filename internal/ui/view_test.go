@@ -7,13 +7,13 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/charmbracelet/bubbles/table"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/table"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	"charm.land/lipgloss/v2/compat"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/hugoh/gh-bulk-pr/internal/github"
 	"github.com/hugoh/gh-bulk-pr/internal/worker"
-	"github.com/muesli/termenv"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -74,7 +74,7 @@ func TestFooterText(t *testing.T) {
 
 	m := loadedModel()
 	assert.Contains(t, m.footerText(), textFilter)
-	assert.Contains(t, m.footerText(), "? help", "keys that don't fit live behind ?")
+	assert.Contains(t, ansi.Strip(m.footerText()), "? help", "keys that don't fit live behind ?")
 
 	m.selected[keyOf(m.prs[0])] = true
 	assert.Contains(t, m.footerText(), "1 selected")
@@ -121,7 +121,7 @@ func TestViewList_Loading(t *testing.T) {
 	t.Parallel()
 
 	m := New(nil, "is:open is:pr")
-	assert.Contains(t, m.View(), "loading")
+	assert.Contains(t, m.View().Content, "loading")
 }
 
 func TestViewList_Error(t *testing.T) {
@@ -129,14 +129,14 @@ func TestViewList_Error(t *testing.T) {
 
 	m := New(nil, "q")
 	m = m.handleSearchDone(searchDoneMsg{err: errors.New("network down")})
-	assert.Contains(t, m.View(), "network down")
+	assert.Contains(t, m.View().Content, "network down")
 }
 
 func TestViewList_ShowsFooterAndTable(t *testing.T) {
 	t.Parallel()
 
 	m := loadedModel()
-	view := m.View()
+	view := m.View().Content
 	assert.Contains(t, view, prTitleFix)
 	assert.Contains(t, view, textFilter)
 }
@@ -147,7 +147,7 @@ func TestViewList_PreviewOpen(t *testing.T) {
 	m := loadedModel()
 	m.previewOpen = true
 
-	view := m.View()
+	view := m.View().Content
 	assert.Contains(t, view, prTitleFix)
 	assert.Contains(t, view, "─") // separator line above the preview
 }
@@ -157,7 +157,7 @@ func TestView_FilterScreen(t *testing.T) {
 
 	m := loadedModel()
 	m.screen = screenFilter
-	assert.Contains(t, m.View(), "Search:")
+	assert.Contains(t, m.View().Content, "Search:")
 }
 
 func TestView_ActionInputScreen(t *testing.T) {
@@ -165,7 +165,7 @@ func TestView_ActionInputScreen(t *testing.T) {
 
 	m := loadedModel()
 	m.screen = screenActionInput
-	assert.Contains(t, m.View(), "Label for")
+	assert.Contains(t, m.View().Content, "Label for")
 }
 
 func TestViewConfirm(t *testing.T) {
@@ -176,7 +176,7 @@ func TestViewConfirm(t *testing.T) {
 	m.action = &pendingAction{label: actionClose}
 	m.confirm = testPRs()
 
-	got := m.View()
+	got := m.View().Content
 	assert.Contains(t, got, actionClose)
 	assert.Contains(t, got, prTitleFix)
 	assert.Contains(t, got, "Add feature")
@@ -194,7 +194,7 @@ func TestViewActionProgress(t *testing.T) {
 	m.actionDone = &done
 	m.actionTotal = 2
 
-	got := m.View()
+	got := m.View().Content
 	assert.Contains(t, got, actionClose)
 	assert.Contains(t, got, "1/2")
 }
@@ -209,18 +209,14 @@ func TestViewResults(t *testing.T) {
 		{PR: github.PR{Number: 2, Title: "Add feature"}, Err: errors.New("403")},
 	}
 
-	got := m.View()
+	got := m.View().Content
 	assert.Contains(t, got, prTitleFix)
 	assert.Contains(t, got, "Add feature")
 	assert.Contains(t, got, "403")
 }
 
-// Not parallel: it swaps the global lipgloss color profile.
 func TestCheckGlyphsAreColored(t *testing.T) {
-	prev := lipgloss.ColorProfile()
-
-	lipgloss.SetColorProfile(termenv.ANSI256)
-	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	t.Parallel()
 
 	m := loadedModel()
 	m.screen = screenResults
@@ -228,16 +224,13 @@ func TestCheckGlyphsAreColored(t *testing.T) {
 		{PR: github.PR{Number: 1}},
 		{PR: github.PR{Number: 2}, Err: errors.New("403")},
 	}
-	got := m.View()
+	got := m.View().Content
 	assert.Contains(t, got, okStyle().Render("✓"))
 	assert.Contains(t, got, errStyle().Render("✗ 403"))
 }
 
 func TestColorChecks_KeepsColorAndHighlightOnSelectedRow(t *testing.T) {
-	prev := lipgloss.ColorProfile()
-
-	lipgloss.SetColorProfile(termenv.ANSI256)
-	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	t.Parallel()
 
 	sel, _, _ := strings.Cut(table.DefaultStyles().Selected.Render("|"), "|")
 	require.NotEmpty(t, sel)
@@ -293,7 +286,7 @@ func TestMergeSummary(t *testing.T) {
 func TestViewList_ShowsMergeSummary(t *testing.T) {
 	t.Parallel()
 
-	got := loadedModel().View()
+	got := loadedModel().View().Content
 	assert.Contains(t, got, "1 behind")
 }
 
@@ -308,12 +301,8 @@ func TestMergeStyle(t *testing.T) {
 	assert.Equal(t, previewMetaStyle().GetForeground(), mergeStyle("-").GetForeground())
 }
 
-// Not parallel: it swaps the global lipgloss color profile.
 func TestColorMerge_ColorsOnlyTheMergeColumn(t *testing.T) {
-	prev := lipgloss.ColorProfile()
-
-	lipgloss.SetColorProfile(termenv.ANSI256)
-	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	t.Parallel()
 
 	m := New(nil, "q").handleResize(tea.WindowSizeMsg{Width: 100, Height: 30})
 	m = m.handleSearchDone(searchDoneMsg{prs: []github.PR{
@@ -379,7 +368,7 @@ func TestViewList_RefreshingKeepsRows(t *testing.T) {
 	t.Parallel()
 
 	m, _ := loadedModel().reload()
-	view := m.View()
+	view := m.View().Content
 
 	assert.Contains(t, view, prTitleFix, "rows stay visible during a refresh")
 	assert.Contains(t, view, "refreshing")
@@ -388,10 +377,10 @@ func TestViewList_RefreshingKeepsRows(t *testing.T) {
 func TestViewList_ShowsLoadedOfTotal(t *testing.T) {
 	t.Parallel()
 
-	assert.Contains(t, pagedModel().View(), "1 of 312 · 50 loaded")
+	assert.Contains(t, pagedModel().View().Content, "1 of 312 · 50 loaded")
 	assert.NotContains(
 		t,
-		loadedModel().View(),
+		loadedModel().View().Content,
 		"loaded",
 		"a complete list has nothing left to load",
 	)
@@ -412,7 +401,7 @@ func TestViewList_LoadingMore(t *testing.T) {
 	m := pagedModel()
 	m.loadingMore = true
 
-	assert.Contains(t, m.View(), "loading more")
+	assert.Contains(t, m.View().Content, "loading more")
 }
 
 func TestViewList_StatusOnSecondLine(t *testing.T) {
@@ -422,7 +411,7 @@ func TestViewList_StatusOnSecondLine(t *testing.T) {
 	m.prs[0].MergeState = mergeBehind
 	m.loadingMore = true
 
-	lines := strings.Split(m.View(), "\n")
+	lines := strings.Split(m.View().Content, "\n")
 
 	assert.Contains(t, lines[0], "gh-bulk-pr")
 	assert.NotContains(t, lines[0], "312")
@@ -439,7 +428,7 @@ func TestViewList_EmptyResultKeepsSpacerLine(t *testing.T) {
 	m := New(nil, "q").handleResize(tea.WindowSizeMsg{Width: 100, Height: 30})
 	m = m.handleSearchDone(searchDoneMsg{prs: nil})
 
-	lines := strings.Split(m.View(), "\n")
+	lines := strings.Split(m.View().Content, "\n")
 
 	assert.Empty(t, strings.TrimSpace(lines[1]))
 	assert.Contains(t, lines[2], "Repo", "table header follows the spacer")
@@ -448,10 +437,10 @@ func TestViewList_EmptyResultKeepsSpacerLine(t *testing.T) {
 func TestViewList_StatusIsRightAligned(t *testing.T) {
 	t.Parallel()
 
-	line := strings.Split(pagedModel().View(), "\n")[1]
+	line := strings.Split(pagedModel().View().Content, "\n")[1]
 
 	assert.Equal(t, 100, lipgloss.Width(line), "padded to the full width")
-	assert.True(t, strings.HasSuffix(strings.TrimRight(line, " "), "50 loaded"))
+	assert.True(t, strings.HasSuffix(strings.TrimRight(ansi.Strip(line), " "), "50 loaded"))
 	assert.True(t, strings.HasPrefix(line, " "), "text sits at the right, not the left")
 }
 
@@ -461,11 +450,13 @@ func TestViewList_StatusShowsCursorPosition(t *testing.T) {
 	m := pagedModel()
 	m.table.SetCursor(36)
 
-	assert.Contains(t, m.View(), "37 of 312 · 50 loaded")
+	assert.Contains(t, m.View().Content, "37 of 312 · 50 loaded")
 
 	small := loadedModel()
 	small.table.SetCursor(1)
-	assert.Contains(t, small.View(), "2 of 2", "complete lists show position out of what's loaded")
+	assert.Contains(
+		t, small.View().Content, "2 of 2", "complete lists show position out of what's loaded",
+	)
 }
 
 func TestViewList_NoPositionWithoutRows(t *testing.T) {
@@ -496,7 +487,7 @@ func TestViewActionInput_ShowsCount(t *testing.T) {
 	m, _ = m.handleListKeyByString("ctrl+a")
 	m, _ = m.handleListKeyByString("l")
 
-	assert.Contains(t, m.View(), "Label for 2 PR(s):")
+	assert.Contains(t, m.View().Content, "Label for 2 PR(s):")
 }
 
 func TestViewConfirm_RepeatsCountAtThePrompt(t *testing.T) {
@@ -506,7 +497,7 @@ func TestViewConfirm_RepeatsCountAtThePrompt(t *testing.T) {
 	m, _ = m.handleListKeyByString("ctrl+a")
 	m, _ = m.handleListKeyByString("c")
 
-	view := m.View()
+	view := m.View().Content
 	lastLine := view[strings.LastIndex(view, "\n")+1:]
 
 	assert.Contains(t, lastLine, "confirm 2 PR(s)")
@@ -520,10 +511,10 @@ func TestViewConfirm_PromptMatchesTheKeysThatWork(t *testing.T) {
 	m.confirm = testPRs()
 
 	m.action = &pendingAction{label: "add label", destructive: false}
-	assert.Contains(t, m.View(), "y/enter to confirm 2 PR(s)")
+	assert.Contains(t, m.View().Content, "y/enter to confirm 2 PR(s)")
 
 	m.action = &pendingAction{label: actionMerge, destructive: true}
-	view := m.View()
+	view := m.View().Content
 	assert.Contains(t, view, "y to confirm 2 PR(s)")
 	assert.NotContains(t, view, "y/enter")
 }
@@ -617,7 +608,7 @@ func TestView_NeverWiderThanTheTerminal(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.LessOrEqual(t, maxLineWidth(build().View()), 100)
+			assert.LessOrEqual(t, maxLineWidth(build().View().Content), 100)
 		})
 	}
 }
@@ -640,15 +631,15 @@ func TestView_TerminalTooSmall(t *testing.T) {
 
 			m := loadedModel().handleResize(tea.WindowSizeMsg{Width: tt.width, Height: tt.height})
 
-			assert.Equal(t, tt.want, strings.Contains(m.View(), "terminal too small"))
+			assert.Equal(t, tt.want, strings.Contains(m.View().Content, "terminal too small"))
 
 			if tt.want {
 				assert.Contains(
 					t,
-					m.View(),
+					m.View().Content,
 					fmt.Sprintf("need %d×%d, have %d×%d", minWidth, minHeight, tt.width, tt.height),
 				)
-				assert.LessOrEqual(t, maxLineWidth(m.View()), tt.width)
+				assert.LessOrEqual(t, maxLineWidth(m.View().Content), tt.width)
 			}
 		})
 	}
@@ -657,7 +648,7 @@ func TestView_TerminalTooSmall(t *testing.T) {
 func TestView_UnknownSizeIsNotTooSmall(t *testing.T) {
 	t.Parallel()
 
-	assert.NotContains(t, New(nil, "q").View(), "terminal too small")
+	assert.NotContains(t, New(nil, "q").View().Content, "terminal too small")
 }
 
 func TestView_PromptsWorkInSmallTerminals(t *testing.T) {
@@ -666,7 +657,9 @@ func TestView_PromptsWorkInSmallTerminals(t *testing.T) {
 	m := loadedModel().handleResize(tea.WindowSizeMsg{Width: 40, Height: 8})
 	m.screen = screenFilter
 
-	assert.NotContains(t, m.View(), "terminal too small", "only the table needs the minimum size")
+	assert.NotContains(
+		t, m.View().Content, "terminal too small", "only the table needs the minimum size",
+	)
 }
 
 func lineCount(view string) int { return strings.Count(view, "\n") + 1 }
@@ -685,7 +678,7 @@ func TestViewConfirm_LongListScrolls(t *testing.T) {
 	t.Parallel()
 
 	m := bigConfirmModel()
-	view := m.View()
+	view := m.View().Content
 
 	assert.LessOrEqual(t, lineCount(view), 30)
 	assert.Contains(t, view, "About to close on 200 PR(s)", "the heading stays pinned")
@@ -695,7 +688,7 @@ func TestViewConfirm_LongListScrolls(t *testing.T) {
 	assert.NotContains(t, view, "#200")
 
 	m, _ = m.handleConfirmKey(keyMsgFromString("G"))
-	view = m.View()
+	view = m.View().Content
 
 	assert.Contains(t, view, "#200")
 	assert.NotContains(t, view, "hugoh/a #1  PR")
@@ -711,7 +704,7 @@ func TestViewConfirm_ShortListHasNoScrollHint(t *testing.T) {
 	m.action = &pendingAction{label: actionClose}
 	m.confirm = testPRs()
 
-	assert.NotContains(t, m.View(), "scroll")
+	assert.NotContains(t, m.View().Content, "scroll")
 }
 
 func TestConfirmScrollKeys(t *testing.T) {
@@ -720,13 +713,13 @@ func TestConfirmScrollKeys(t *testing.T) {
 	m := bigConfirmModel()
 
 	m, _ = m.handleConfirmKey(keyMsgFromString("j"))
-	assert.Equal(t, 1, m.pane.YOffset)
+	assert.Equal(t, 1, m.pane.YOffset())
 
 	m, _ = m.handleConfirmKey(keyMsgFromString("G"))
-	assert.Positive(t, m.pane.YOffset)
+	assert.Positive(t, m.pane.YOffset())
 
 	m, _ = m.handleConfirmKey(keyMsgFromString("g"))
-	assert.Zero(t, m.pane.YOffset)
+	assert.Zero(t, m.pane.YOffset())
 
 	same, _ := m.handleConfirmKey(keyMsgFromString("j"))
 	assert.Equal(t, screenConfirm, same.screen, "scrolling doesn't confirm or cancel")
@@ -737,13 +730,13 @@ func TestEnteringConfirmStartsAtTheTop(t *testing.T) {
 
 	m := loadedModel()
 	m.pane.SetContent(strings.Repeat("x\n", 100))
-	m.pane.YOffset = 5
+	m.pane.SetYOffset(5)
 
 	m, _ = m.handleListKeyByString("ctrl+a")
 	m, _ = m.handleListKeyByString("c")
 
 	assert.Equal(t, screenConfirm, m.screen)
-	assert.Zero(t, m.pane.YOffset)
+	assert.Zero(t, m.pane.YOffset())
 }
 
 func TestResize_SizesThePane(t *testing.T) {
@@ -751,8 +744,8 @@ func TestResize_SizesThePane(t *testing.T) {
 
 	m := loadedModel().handleResize(tea.WindowSizeMsg{Width: 120, Height: 40})
 
-	assert.Equal(t, 120, m.pane.Width)
-	assert.Equal(t, 40-paneChrome, m.pane.Height)
+	assert.Equal(t, 120, m.pane.Width())
+	assert.Equal(t, 40-paneChrome, m.pane.Height())
 }
 
 func bigResultsModel() Model {
@@ -778,7 +771,7 @@ func TestViewResults_FailuresFirstAndSummarised(t *testing.T) {
 	t.Parallel()
 
 	m := bigResultsModel()
-	view := m.View()
+	view := m.View().Content
 
 	assert.LessOrEqual(t, lineCount(view), 30)
 	assert.Contains(t, view, "Results: 198 ok · 2 failed")
@@ -801,8 +794,8 @@ func TestViewResults_AllOK(t *testing.T) {
 	m.screen = screenResults
 	m.results = []worker.Result{{PR: github.PR{Number: 1}}}
 
-	assert.Contains(t, m.View(), "Results: 1 ok")
-	assert.NotContains(t, m.View(), "failed")
+	assert.Contains(t, m.View().Content, "Results: 1 ok")
+	assert.NotContains(t, m.View().Content, "failed")
 }
 
 func TestResultsScrollKeys(t *testing.T) {
@@ -811,11 +804,11 @@ func TestResultsScrollKeys(t *testing.T) {
 	m := bigResultsModel()
 
 	m, _ = m.handleResultsKey(keyMsgFromString("j"))
-	assert.Equal(t, 1, m.pane.YOffset)
+	assert.Equal(t, 1, m.pane.YOffset())
 	assert.Equal(t, screenResults, m.screen, "scrolling doesn't leave the results")
 
 	m, _ = m.handleResultsKey(keyMsgFromString("G"))
-	assert.Positive(t, m.pane.YOffset)
+	assert.Positive(t, m.pane.YOffset())
 }
 
 func TestActionDoneStartsResultsAtTheTop(t *testing.T) {
@@ -823,13 +816,13 @@ func TestActionDoneStartsResultsAtTheTop(t *testing.T) {
 
 	m := bigResultsModel()
 	m.results = nil
-	m.pane.YOffset = 7
+	m.pane.SetYOffset(7)
 
 	updated, _ := m.Update(actionDoneMsg{results: bigResultsModel().results})
 
 	mm, ok := updated.(Model)
 	require.True(t, ok)
-	assert.Zero(t, mm.pane.YOffset)
+	assert.Zero(t, mm.pane.YOffset())
 }
 
 func lastLine(view string) string { return view[strings.LastIndex(view, "\n")+1:] }
@@ -838,7 +831,7 @@ func TestFilterPrompt_KeepsTheListVisible(t *testing.T) {
 	t.Parallel()
 
 	m, _ := loadedModel().handleListKeyByString("/")
-	view := m.View()
+	view := m.View().Content
 	lines := strings.Split(view, "\n")
 
 	assert.Contains(t, view, prTitleFix, "the list stays on screen while editing the query")
@@ -855,7 +848,7 @@ func TestLabelPrompt_KeepsTheListVisible(t *testing.T) {
 	m := loadedModel()
 	m, _ = m.handleListKeyByString("ctrl+a")
 	m, _ = m.handleListKeyByString("l")
-	view := m.View()
+	view := m.View().Content
 
 	assert.Contains(t, view, prTitleFix)
 	assert.Contains(t, lastLine(view), "Label for 2 PR(s): ")
@@ -868,7 +861,7 @@ func TestPrompt_ShownWhileTheFirstSearchIsStillLoading(t *testing.T) {
 	m := New(nil, "q").handleResize(tea.WindowSizeMsg{Width: 100, Height: 30})
 	m, _ = m.startFilter()
 
-	view := m.View()
+	view := m.View().Content
 
 	assert.Contains(t, view, "loading")
 	assert.Contains(t, lastLine(view), "Search: ")
@@ -880,10 +873,10 @@ func TestPrompt_LongInputScrollsInsteadOfOverflowing(t *testing.T) {
 	m, _ := loadedModel().handleListKeyByString("/")
 	m.filterInput.SetValue(strings.Repeat("q", 500))
 
-	assert.LessOrEqual(t, lipgloss.Width(lastLine(m.View())), 100)
+	assert.LessOrEqual(t, lipgloss.Width(lastLine(m.View().Content)), 100)
 	assert.Positive(
 		t,
-		m.filterInput.Width,
+		m.filterInput.Width(),
 		"a width lets the input scroll to keep the cursor in view",
 	)
 }
@@ -894,7 +887,7 @@ func TestPrompt_FallsBackToTheBarePromptWhenTheListCannotFit(t *testing.T) {
 	m := loadedModel().handleResize(tea.WindowSizeMsg{Width: 50, Height: 8})
 	m, _ = m.startFilter()
 
-	view := m.View()
+	view := m.View().Content
 
 	assert.NotContains(t, view, "terminal too small")
 	assert.Contains(t, view, "Search: ")
@@ -902,48 +895,53 @@ func TestPrompt_FallsBackToTheBarePromptWhenTheListCannotFit(t *testing.T) {
 }
 
 // Not parallel: it swaps the global lipgloss color profile and background.
+// Not parallel: it swaps the global compat.HasDarkBackground used by adaptive().
 func TestStylesAdaptToTheBackground(t *testing.T) {
-	prevProfile := lipgloss.ColorProfile()
-	prevDark := lipgloss.HasDarkBackground()
+	prevDark := compat.HasDarkBackground
 
-	lipgloss.SetColorProfile(termenv.ANSI256)
-	t.Cleanup(func() {
-		lipgloss.SetColorProfile(prevProfile)
-		lipgloss.SetHasDarkBackground(prevDark)
-	})
+	t.Cleanup(func() { compat.HasDarkBackground = prevDark })
 
 	tests := map[string]struct {
 		render      func(string) string
 		light, dark string
 	}{
-		"ok": {func(s string) string { return okStyle().Render(s) }, "38;5;28m", "38;5;42m"},
+		// lipgloss v2 has no color-profile downgrading of its own (that's now
+		// the terminal renderer's job), so compat.AdaptiveColor always renders
+		// its RGB value rather than the original ANSI256 code.
+		"ok": {
+			func(s string) string { return okStyle().Render(s) },
+			"38;2;0;135;0m",
+			"38;2;0;215;135m",
+		},
 		"error": {
 			func(s string) string { return errStyle().Render(s) },
-			"38;5;160m",
-			"38;5;196m",
+			"38;2;215;0;0m",
+			"38;2;255;0;0m",
 		},
 		"help": {
 			func(s string) string { return helpStyle().Render(s) },
-			"38;5;243m",
-			"38;5;241m",
+			"38;2;118;118;118m",
+			"38;2;98;98;98m",
 		},
 		"label": {
 			func(s string) string { return previewLabelStyle().Render(s) },
-			"38;5;166m",
-			"38;5;214m",
+			"38;2;215;95;0m",
+			"38;2;255;175;0m",
 		},
 		"reviewer": {
 			func(s string) string { return previewReviewerStyle().Render(s) },
-			"38;5;27m",
-			"38;5;39m",
+			"38;2;0;95;255m",
+			"38;2;0;175;255m",
 		},
 	}
 
 	for name, tt := range tests {
-		lipgloss.SetHasDarkBackground(false)
+		compat.HasDarkBackground = false
+
 		assert.Contains(t, tt.render("x"), tt.light, name+" on a light background")
 
-		lipgloss.SetHasDarkBackground(true)
+		compat.HasDarkBackground = true
+
 		assert.Contains(t, tt.render("x"), tt.dark, name+" on a dark background")
 	}
 }
@@ -967,7 +965,7 @@ func TestViewList_LoadingMoreIndicatorSitsUnderTheTable(t *testing.T) {
 	m := pagedModel()
 	m.loadingMore = true
 
-	lines := strings.Split(m.View(), "\n")
+	lines := strings.Split(m.View().Content, "\n")
 	last := lastTableRowLine(lines)
 
 	require.Positive(t, last)
@@ -979,7 +977,7 @@ func TestViewList_NoIndicatorWhenNotLoadingMore(t *testing.T) {
 	t.Parallel()
 
 	m := pagedModel()
-	lines := strings.Split(m.View(), "\n")
+	lines := strings.Split(m.View().Content, "\n")
 	last := lastTableRowLine(lines)
 
 	require.Positive(t, last)
@@ -988,7 +986,7 @@ func TestViewList_NoIndicatorWhenNotLoadingMore(t *testing.T) {
 		strings.TrimSpace(lines[last+1]),
 		"the line is reserved, so the layout doesn't jump",
 	)
-	assert.NotContains(t, m.View(), "loading more")
+	assert.NotContains(t, m.View().Content, "loading more")
 }
 
 func TestViewList_LoadingMoreDoesNotChangeTheHeight(t *testing.T) {
@@ -998,10 +996,10 @@ func TestViewList_LoadingMoreDoesNotChangeTheHeight(t *testing.T) {
 	busy := pagedModel()
 	busy.loadingMore = true
 
-	assert.Equal(t, lineCount(idle.View()), lineCount(busy.View()))
-	assert.LessOrEqual(t, lineCount(busy.View()), 30)
-	assert.Equal(t, lastTableRowLine(strings.Split(idle.View(), "\n")),
-		lastTableRowLine(strings.Split(busy.View(), "\n")), "the table doesn't move")
+	assert.Equal(t, lineCount(idle.View().Content), lineCount(busy.View().Content))
+	assert.LessOrEqual(t, lineCount(busy.View().Content), 30)
+	assert.Equal(t, lastTableRowLine(strings.Split(idle.View().Content, "\n")),
+		lastTableRowLine(strings.Split(busy.View().Content, "\n")), "the table doesn't move")
 }
 
 func TestViewList_LoadingMoreIndicatorStaysAboveThePreview(t *testing.T) {
@@ -1012,7 +1010,7 @@ func TestViewList_LoadingMoreIndicatorStaysAboveThePreview(t *testing.T) {
 	m = m.syncTableHeight()
 	m.loadingMore = true
 
-	view := m.View()
+	view := m.View().Content
 
 	assert.Less(t, strings.Index(view, "loading more…"), strings.Index(view, "───"))
 }
