@@ -280,14 +280,21 @@ func TestHandleListKey_RefreshReloadsPRs(t *testing.T) {
 	assert.NotNil(t, cmd)
 }
 
-func TestHandleListKey_StartAction_NoSelection(t *testing.T) {
+func TestHandleListKey_StartAction_NoSelectionTargetsFocused(t *testing.T) {
 	t.Parallel()
 
 	m := loadedModel()
-	m, cmd := m.handleListKeyByString("c")
+	m, _ = m.handleListKeyByString("j")
+	m, _ = m.handleListKeyByString("c")
 
-	assert.Equal(t, screenList, m.screen, "action keys are no-ops with nothing selected")
-	assert.Nil(t, cmd)
+	assert.Equal(t, screenConfirm, m.screen)
+	assert.Equal(
+		t,
+		[]github.PR{m.prs[1]},
+		m.confirm,
+		"with nothing selected, actions apply to the focused PR",
+	)
+	assert.Empty(t, m.selected)
 }
 
 func TestHandleListKey_StartAction_NeedsInput(t *testing.T) {
