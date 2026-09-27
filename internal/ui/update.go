@@ -559,7 +559,7 @@ func (m Model) selectAll() (Model, tea.Cmd) {
 }
 
 func (m Model) startAction(actionKey string) (Model, tea.Cmd) {
-	if len(m.selected) == 0 {
+	if len(m.targetPRs()) == 0 {
 		return m, nil
 	}
 
@@ -576,7 +576,7 @@ func (m Model) startAction(actionKey string) (Model, tea.Cmd) {
 	if m.action != nil && m.action.note != nil {
 		note := m.action.note
 		m.action.destructive = slices.ContainsFunc(
-			m.selectedPRs(),
+			m.targetPRs(),
 			func(pr github.PR) bool { return note(pr) != "" },
 		)
 	}
@@ -658,7 +658,7 @@ func (m Model) handleActionInputKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 }
 
 func (m Model) enterConfirm() Model {
-	m.confirm = m.selectedPRs()
+	m.confirm = m.targetPRs()
 	m.screen = screenConfirm
 	m.pane.GotoTop()
 
@@ -733,6 +733,20 @@ func (m Model) selectedPRs() []github.PR {
 	}
 
 	return out
+}
+
+// targetPRs is what actions apply to: the selection, or the focused PR when
+// nothing is selected.
+func (m Model) targetPRs() []github.PR {
+	if len(m.selected) > 0 {
+		return m.selectedPRs()
+	}
+
+	if pr, ok := m.focusedPR(); ok {
+		return []github.PR{pr}
+	}
+
+	return nil
 }
 
 func (m Model) refreshRows() Model {
