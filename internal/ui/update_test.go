@@ -220,11 +220,15 @@ func TestHandleListKey_ToggleSelection(t *testing.T) {
 	assert.Empty(t, m.selected)
 
 	m, _ = m.handleListKeyByString("x")
-	assert.NotEmpty(t, m.selected)
 	assert.True(t, m.selected[keyOf(m.prs[0])], "toggling should select the focused (first) row")
+	assert.Equal(t, 1, m.table.Cursor(), "toggling advances to the next row")
 
 	m, _ = m.handleListKeyByString("x")
-	assert.Empty(t, m.selected, "toggling again should deselect")
+	assert.Len(t, m.selected, 2)
+
+	m.table.SetCursor(0)
+	m, _ = m.handleListKeyByString("x")
+	assert.False(t, m.selected[keyOf(m.prs[0])], "toggling again should deselect")
 }
 
 func TestHandleListKey_SelectAll(t *testing.T) {
@@ -489,6 +493,17 @@ func TestListKey_AutoMerge(t *testing.T) {
 			assert.Equal(t, tt.wantMergesNow, strings.Count(m.confirmBody(), "merges now"))
 		})
 	}
+}
+
+func TestListKey_UpdateBranch(t *testing.T) {
+	t.Parallel()
+
+	m, _ := loadedModel().handleListKeyByString("u")
+
+	require.Equal(t, screenConfirm, m.screen)
+	require.NotNil(t, m.action)
+	assert.Equal(t, "update branch", m.action.label)
+	assert.False(t, m.action.destructive)
 }
 
 func TestHandleResultsKey(t *testing.T) {

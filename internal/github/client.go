@@ -307,6 +307,13 @@ func (c *Client) MergePR(ctx context.Context, pr PR) error {
 		map[string]string{"merge_method": "squash"})
 }
 
+// UpdateBranch merges the base branch into a PR that is behind it.
+func (c *Client) UpdateBranch(ctx context.Context, pr PR) error {
+	return c.do(ctx, "update branch", http.MethodPut,
+		fmt.Sprintf("repos/%s/pulls/%d/update-branch", pr.Repo, pr.Number),
+		struct{}{})
+}
+
 const (
 	enableAutoMergeMutation = `
 mutation($id: ID!) {

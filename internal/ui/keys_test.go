@@ -22,7 +22,7 @@ func TestHelpScreen_OpensListsEveryKeyAndCloses(t *testing.T) {
 		"↑/k", "↓/j", "g/home", "G/end", "pgup/b", "pgdn/f", // navigation, handled by the table
 		"x/space", "ctrl+a", "esc", "enter/p", // selecting and previewing
 		"/", "open/closed", "1/2", "r", "T", "o", "open", "O", "open all", // searching
-		textLabel, actionClose, "merge", textAuto, "select all", "checks", textHelp, "quit",
+		textLabel, actionClose, "merge", textAuto, "update", "select all", "checks", textHelp, "quit",
 	} {
 		assert.Contains(t, view, want)
 	}
