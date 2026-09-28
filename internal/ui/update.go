@@ -543,9 +543,10 @@ func (m Model) toggleFocusedSelection() (Model, tea.Cmd) {
 		}
 
 		m = m.refreshRows()
+		m.table.MoveDown(1)
 	}
 
-	return m, nil
+	return m.followCursor()
 }
 
 func (m Model) selectAll() (Model, tea.Cmd) {
