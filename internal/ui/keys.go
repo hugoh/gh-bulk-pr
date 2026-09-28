@@ -9,7 +9,7 @@ type keyMap struct {
 	Move, Up, Down, Top, Bottom, PageUp, PageDown      key.Binding
 	Select, SelectAll, Clear, Preview                  key.Binding
 	Filter, State, Tab, Refresh, Checks, Open, OpenAll key.Binding
-	Label, Close, Merge, AutoMerge                     key.Binding
+	Label, Close, Merge, AutoMerge, Update             key.Binding
 	Help, Quit                                         key.Binding
 }
 
@@ -41,6 +41,7 @@ func newKeyMap() keyMap {
 		Close:     binding("c", "close", "c"),
 		Merge:     binding("m", "merge", "m"),
 		AutoMerge: binding("a", "auto", "a"),
+		Update:    binding("u", "update", "u"),
 		Help:      binding("?", "help", "?"),
 		Quit:      binding("q", "quit", "q"),
 	}
@@ -62,6 +63,6 @@ func (k keyMap) full() [][]key.Binding {
 		{k.Up, k.Down, k.Top, k.Bottom, k.PageUp, k.PageDown},
 		{k.Select, k.SelectAll, k.Clear, k.Preview},
 		{k.Filter, k.State, k.Tab, k.Refresh, k.Checks, k.Open, k.OpenAll},
-		{k.Label, k.Close, k.Merge, k.AutoMerge, k.Help, k.Quit},
+		{k.Label, k.Close, k.Merge, k.AutoMerge, k.Update, k.Help, k.Quit},
 	}
 }

@@ -407,7 +407,7 @@ func (m Model) handleListKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		return m.reload()
 	case key.Matches(
 		msg, keys.Checks, keys.Open, keys.OpenAll, keys.State, keys.Tab,
-		keys.Label, keys.Close, keys.Merge, keys.AutoMerge,
+		keys.Label, keys.Close, keys.Merge, keys.AutoMerge, keys.Update,
 	):
 		return m.handleCommandKey(msg, openArmed)
 	}

@@ -495,6 +495,17 @@ func TestListKey_AutoMerge(t *testing.T) {
 	}
 }
 
+func TestListKey_UpdateBranch(t *testing.T) {
+	t.Parallel()
+
+	m, _ := loadedModel().handleListKeyByString("u")
+
+	require.Equal(t, screenConfirm, m.screen)
+	require.NotNil(t, m.action)
+	assert.Equal(t, "update branch", m.action.label)
+	assert.False(t, m.action.destructive)
+}
+
 func TestHandleResultsKey(t *testing.T) {
 	t.Parallel()
 

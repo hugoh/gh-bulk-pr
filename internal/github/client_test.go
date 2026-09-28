@@ -82,6 +82,14 @@ func TestClientActions(t *testing.T) {
 			wantPath:       "/repos/hugoh/gh-bulk-pr/pulls/7/merge",
 			wantBodySubstr: `"squash"`,
 		},
+		"update branch": {
+			call: func(ctx context.Context, c *Client) error {
+				return c.UpdateBranch(ctx, PR{Repo: testRepo, Number: 7})
+			},
+			wantMethod:     http.MethodPut,
+			wantPath:       "/repos/hugoh/gh-bulk-pr/pulls/7/update-branch",
+			wantBodySubstr: `{}`,
+		},
 	}
 
 	for name, tt := range tests {
@@ -126,6 +134,9 @@ func TestClientActions_TransportError(t *testing.T) {
 		"add label": func() error { return client.AddLabel(context.Background(), PR{Repo: testRepo, Number: 1}, "bug") },
 		"close pr":  func() error { return client.ClosePR(context.Background(), PR{Repo: testRepo, Number: 1}) },
 		"merge pr":  func() error { return client.MergePR(context.Background(), PR{Repo: testRepo, Number: 1}) },
+		"update branch": func() error {
+			return client.UpdateBranch(context.Background(), PR{Repo: testRepo, Number: 1})
+		},
 	}
 
 	for name, call := range tests {
