@@ -44,6 +44,7 @@ Press `?` in the app for this list.
 | `T` | checks |
 | `o` | open |
 | `O` | open all |
+| `y` | copy url |
 | `l` | label |
 | `c` | close |
 | `m` | merge |

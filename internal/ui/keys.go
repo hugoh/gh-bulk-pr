@@ -6,11 +6,11 @@ import "charm.land/bubbles/v2/key"
 // footer and the "?" screen are generated from it. Up/Down/Top/Bottom/Page*
 // are handled by the table itself and appear here only so the help lists them.
 type keyMap struct {
-	Move, Up, Down, Top, Bottom, PageUp, PageDown      key.Binding
-	Select, SelectAll, Clear, Preview                  key.Binding
-	Filter, State, Tab, Refresh, Checks, Open, OpenAll key.Binding
-	Label, Close, Merge, AutoMerge, Update             key.Binding
-	Help, Quit                                         key.Binding
+	Move, Up, Down, Top, Bottom, PageUp, PageDown            key.Binding
+	Select, SelectAll, Clear, Preview                        key.Binding
+	Filter, State, Tab, Refresh, Checks, Open, OpenAll, Copy key.Binding
+	Label, Close, Merge, AutoMerge, Update                   key.Binding
+	Help, Quit                                               key.Binding
 }
 
 func binding(helpKey, desc string, keys ...string) key.Binding {
@@ -37,6 +37,7 @@ func newKeyMap() keyMap {
 		Checks:    binding("T", "checks", "T"),
 		Open:      binding("o", "open", "o"),
 		OpenAll:   binding("O", "open all", "O"),
+		Copy:      binding("y", "copy url", "y"),
 		Label:     binding("l", "label", "l"),
 		Close:     binding("c", "close", "c"),
 		Merge:     binding("m", "merge", "m"),
@@ -62,7 +63,7 @@ func (k keyMap) full() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.Top, k.Bottom, k.PageUp, k.PageDown},
 		{k.Select, k.SelectAll, k.Clear, k.Preview},
-		{k.Filter, k.State, k.Tab, k.Refresh, k.Checks, k.Open, k.OpenAll},
+		{k.Filter, k.State, k.Tab, k.Refresh, k.Checks, k.Open, k.OpenAll, k.Copy},
 		{k.Label, k.Close, k.Merge, k.AutoMerge, k.Update, k.Help, k.Quit},
 	}
 }

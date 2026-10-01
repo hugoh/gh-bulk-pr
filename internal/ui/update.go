@@ -406,7 +406,7 @@ func (m Model) handleListKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	case key.Matches(msg, keys.Refresh):
 		return m.reload()
 	case key.Matches(
-		msg, keys.Checks, keys.Open, keys.OpenAll, keys.State, keys.Tab,
+		msg, keys.Checks, keys.Open, keys.OpenAll, keys.Copy, keys.State, keys.Tab,
 		keys.Label, keys.Close, keys.Merge, keys.AutoMerge, keys.Update,
 	):
 		return m.handleCommandKey(msg, openArmed)
@@ -477,6 +477,8 @@ func (m Model) handleCommandKey(msg tea.KeyPressMsg, openArmed bool) (Model, tea
 		return m, m.openFocused()
 	case key.Matches(msg, m.keys.OpenAll):
 		return m.openSelected(openArmed)
+	case key.Matches(msg, m.keys.Copy):
+		return m, m.copyFocusedURL()
 	case key.Matches(msg, m.keys.State):
 		return m.toggleState()
 	case key.Matches(msg, m.keys.Tab):
