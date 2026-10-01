@@ -183,6 +183,17 @@ func (m Model) openFocused() tea.Cmd {
 	return m.openAll([]string{pr.URL})
 }
 
+// copyFocusedURL puts the focused PR's URL on the clipboard (OSC 52, so it
+// also works over SSH).
+func (m Model) copyFocusedURL() tea.Cmd {
+	pr, ok := m.focusedPR()
+	if !ok || pr.URL == "" {
+		return nil
+	}
+
+	return tea.SetClipboard(pr.URL)
+}
+
 // openAll opens each url in turn, off the UI thread. One failure doesn't stop
 // the rest; the first is reported.
 func (m Model) openAll(urls []string) tea.Cmd {

@@ -1833,3 +1833,22 @@ func TestSearchDone_ShowsRowsWithPlaceholdersUntilDetailsLand(t *testing.T) {
 	assert.Equal(t, "…", m.table.Rows()[0][4])
 	assert.Equal(t, "…", m.table.Rows()[0][5])
 }
+
+func TestCopyFocusedURL(t *testing.T) {
+	t.Parallel()
+
+	var opened []string
+
+	m := browserModel(0, &opened, nil)
+	m.table.SetCursor(2)
+
+	after, cmd := m.handleListKeyByString("y")
+	require.NotNil(t, cmd)
+	require.Equal(t, tea.SetClipboard(m.prs[2].URL)(), cmd())
+	require.Empty(t, after.selected)
+	require.Empty(t, opened)
+
+	m.prs[2].URL = ""
+	_, cmd = m.handleListKeyByString("y")
+	require.Nil(t, cmd)
+}
