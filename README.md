@@ -19,6 +19,7 @@ gh bulk-pr --query "is:open is:pr author:@me archived:false"
 | --- | --- | --- |
 | `--mouse` | `false` | scroll with the mouse wheel (the terminal then needs shift to select text) |
 | `--query` | `is:open is:pr archived:false sort:updated-desc owner:@me` | GitHub search query for the PR list |
+| `--refresh` | `30s` | how often to re-check PRs whose checks are pending, e.g. 30s (0 turns it off) |
 | `--version` | `false` | print version and exit |
 
 ## Keys

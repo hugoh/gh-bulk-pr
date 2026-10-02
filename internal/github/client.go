@@ -21,9 +21,10 @@ type PR struct {
 	Author     string
 	Labels     []string
 	Reviewers  []string
-	Checks     string // ChecksPass, ChecksFail, or "" when there are none
-	AutoMerge  bool   // auto-merge is enabled: it merges once its requirements pass
-	MergeState string // raw GraphQL mergeStateStatus, e.g. "CLEAN", "BEHIND"
+	Checks     string   // ChecksPass, ChecksFail, ChecksPending, or "" when there are none
+	Pending    []string // names of the checks still running or waiting, e.g. "renovate/stability-days"
+	AutoMerge  bool     // auto-merge is enabled: it merges once its requirements pass
+	MergeState string   // raw GraphQL mergeStateStatus, e.g. "CLEAN", "BEHIND"
 	Body       string
 	URL        string
 	Detailed   bool // false until Details has filled in checks, merge state, labels, reviewers and body
@@ -36,6 +37,13 @@ func (p PR) MergesNow() bool {
 	return !p.AutoMerge && p.MergeState == MergeClean
 }
 
+// Waiting reports whether the PR's state can still change without anyone
+// acting on it: its checks are pending or GitHub hasn't worked out its merge
+// state yet.
+func (p PR) Waiting() bool {
+	return p.Detailed && (p.Checks == ChecksPending || p.MergeState == MergeUnknown)
+}
+
 // Detail is what SearchPage leaves out because GitHub computes it per PR and
 // it is slow: merge state, check rollup, labels, reviewers and body.
 type Detail struct {
@@ -43,6 +51,7 @@ type Detail struct {
 	Body       string
 	MergeState string
 	Checks     string
+	Pending    []string
 	Labels     []string
 	Reviewers  []string
 }
@@ -50,7 +59,7 @@ type Detail struct {
 // WithDetail returns p with d's fields filled in and Detailed set.
 func (p PR) WithDetail(d Detail) PR {
 	p.Body, p.MergeState, p.Checks = d.Body, d.MergeState, d.Checks
-	p.Labels, p.Reviewers = d.Labels, d.Reviewers
+	p.Pending, p.Labels, p.Reviewers = d.Pending, d.Labels, d.Reviewers
 	p.Detailed = true
 
 	return p
@@ -67,10 +76,16 @@ type Page struct {
 // MergeClean is mergeStateStatus for a PR with nothing left to wait for.
 const MergeClean = "CLEAN"
 
+// MergeUnknown is mergeStateStatus while GitHub is still computing it.
+const MergeUnknown = "UNKNOWN"
+
 // Check states reported in PR.Checks.
 const (
 	ChecksPass = "pass"
 	ChecksFail = "fail"
+	// ChecksPending is a rollup still waiting on something: a running job or a
+	// status like renovate/stability-days.
+	ChecksPending = "pending"
 )
 
 // Client talks to the GitHub API using the token gh auth login already set up.
@@ -129,7 +144,13 @@ query($ids: [ID!]!) {
         ... on Team { name }
       } } }
       commits(last: 1) {
-        nodes { commit { statusCheckRollup { state } } }
+        nodes { commit { statusCheckRollup {
+          state
+          contexts(first: 50) { nodes {
+            ... on StatusContext { context state }
+            ... on CheckRun { name status }
+          } }
+        } } }
       }
     }
   }
@@ -180,10 +201,35 @@ type detailNode struct {
 	Commits struct {
 		Nodes []struct {
 			Commit struct {
-				StatusCheckRollup struct{ State string }
+				StatusCheckRollup struct {
+					State    string
+					Contexts struct {
+						Nodes []checkContext
+					}
+				}
 			}
 		}
 	}
+}
+
+// checkContext is a commit status (Context, State) or a check run (Name,
+// Status); the fields of the other kind stay empty.
+type checkContext struct {
+	Context string
+	State   string
+	Name    string
+	Status  string
+}
+
+func (c checkContext) pendingName() string {
+	switch {
+	case c.Context != "" && (c.State == "PENDING" || c.State == "EXPECTED"):
+		return c.Context
+	case c.Name != "" && c.Status != "" && c.Status != "COMPLETED":
+		return c.Name
+	}
+
+	return ""
 }
 
 // SearchPageSize is how many PRs each search request fetches.
@@ -275,11 +321,21 @@ func detailFromNode(node detailNode) Detail {
 	}
 
 	if len(node.Commits.Nodes) > 0 {
-		switch node.Commits.Nodes[0].Commit.StatusCheckRollup.State {
+		rollup := node.Commits.Nodes[0].Commit.StatusCheckRollup
+
+		switch rollup.State {
 		case "SUCCESS":
 			result.Checks = ChecksPass
 		case "FAILURE", "ERROR":
 			result.Checks = ChecksFail
+		case "PENDING", "EXPECTED":
+			result.Checks = ChecksPending
+		}
+
+		for _, ctx := range rollup.Contexts.Nodes {
+			if name := ctx.pendingName(); name != "" {
+				result.Pending = append(result.Pending, name)
+			}
 		}
 	}
 

@@ -38,7 +38,8 @@ func main() {
 
 	model := ui.New(client, opts.Query).
 		WithHistory(history.New(history.DefaultPath())).
-		WithMouse(opts.Mouse)
+		WithMouse(opts.Mouse).
+		WithRefresh(opts.Refresh)
 
 	if _, err := tea.NewProgram(model).Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "gh-bulk-pr:", err)

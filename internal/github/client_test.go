@@ -437,3 +437,77 @@ func TestToggleAutoMerge_Error(t *testing.T) {
 	err := (&Client{gql: gql}).ToggleAutoMerge(context.Background(), PR{ID: testNodeID})
 	require.ErrorContains(t, err, "clean status")
 }
+
+const stabilityDays = "renovate/stability-days"
+
+const pendingDetailsResponseJSON = `{
+  "data": {
+    "nodes": [
+      {
+        "id": "PR_wait",
+        "mergeStateStatus": "BLOCKED",
+        "commits": {"nodes": [{"commit": {"statusCheckRollup": {
+          "state": "PENDING",
+          "contexts": {"nodes": [
+            {"context": "renovate/stability-days", "state": "PENDING"},
+            {"context": "ci/lint", "state": "SUCCESS"},
+            {"name": "build", "status": "IN_PROGRESS", "conclusion": ""},
+            {"name": "test", "status": "COMPLETED", "conclusion": "SUCCESS"}
+          ]}
+        }}}]}
+      }
+    ]
+  }
+}`
+
+func TestDetails_PendingChecks(t *testing.T) {
+	t.Parallel()
+
+	var sent string
+
+	gql := graphQLCapturing(t, &sent, pendingDetailsResponseJSON)
+
+	details, err := (&Client{gql: gql}).Details(context.Background(), []string{"PR_wait"})
+	require.NoError(t, err)
+	require.Len(t, details, 1)
+
+	assert.Contains(t, sent, "contexts")
+	assert.Equal(t, ChecksPending, details[0].Checks)
+	assert.Equal(t, []string{stabilityDays, "build"}, details[0].Pending)
+}
+
+func TestPR_WithDetail_CopiesPending(t *testing.T) {
+	t.Parallel()
+
+	full := PR{}.WithDetail(Detail{Checks: ChecksPending, Pending: []string{stabilityDays}})
+
+	assert.Equal(t, []string{stabilityDays}, full.Pending)
+}
+
+func TestPR_Waiting(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		pr   PR
+		want bool
+	}{
+		"pending checks": {PR{Detailed: true, Checks: ChecksPending}, true},
+		"merge state unknown": {
+			PR{Detailed: true, Checks: ChecksPass, MergeState: "UNKNOWN"},
+			true,
+		},
+		"passing": {
+			PR{Detailed: true, Checks: ChecksPass, MergeState: MergeClean},
+			false,
+		},
+		"failing":            {PR{Detailed: true, Checks: ChecksFail}, false},
+		"details not loaded": {PR{Checks: ChecksPending}, false},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, tt.pr.Waiting())
+		})
+	}
+}

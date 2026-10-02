@@ -5,6 +5,7 @@ package ui
 import (
 	"context"
 	"sync/atomic"
+	"time"
 
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
@@ -87,6 +88,10 @@ type Model struct {
 	detailCtx context.Context          //nolint:containedctx // ends with the search, like cancel
 	detailErr error                    // last failure loading details; the rows stay usable
 
+	refreshEvery    time.Duration // base poll interval for pending PRs; 0 turns polling off
+	refreshInterval time.Duration // current interval, backed off while polls find nothing new
+	refreshArmed    bool          // a poll tick is scheduled
+
 	cancelMore context.CancelFunc // stops the further page being fetched, if any
 
 	open        func(url string) error // opens a URL in the browser; replaced in tests
@@ -94,7 +99,8 @@ type Model struct {
 	openArmed   bool                   // O was pressed with a large selection; a second O opens them
 	quitArmed   bool                   // q was pressed with a selection; a second q quits
 	previewOpen bool
-	mouseMode   tea.MouseMode // set once via WithMouse; reported by View
+	markdown    *markdownCache // rendered PR bodies for the preview
+	mouseMode   tea.MouseMode  // set once via WithMouse; reported by View
 	err         error
 	moreErr     error // last failure loading a further page; the list stays usable
 	loading     bool  // first page of a search in flight
@@ -180,6 +186,7 @@ func New(client *github.Client, query string) Model {
 		fetched:     map[string]fetchState{},
 		detailCtx:   context.Background(),
 		loading:     true,
+		markdown:    newMarkdownCache(),
 		spinner:     spin,
 		progress:    prog,
 	}

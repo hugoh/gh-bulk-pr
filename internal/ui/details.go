@@ -88,6 +88,11 @@ func abs(n int) int { return max(n, -n) }
 // fetchDetails starts details requests for the wanted rows, up to
 // detailConcurrency at a time.
 func (m Model) fetchDetails() (Model, tea.Cmd) {
+	return m.fetchIDs(m.wantedDetails())
+}
+
+// fetchIDs starts details requests for ids, up to detailConcurrency at a time.
+func (m Model) fetchIDs(ids []string) (Model, tea.Cmd) {
 	slots := detailConcurrency - m.fetching
 	if slots <= 0 {
 		return m, nil
@@ -95,7 +100,7 @@ func (m Model) fetchDetails() (Model, tea.Cmd) {
 
 	var cmds []tea.Cmd
 
-	for batch := range slices.Chunk(m.wantedDetails(), detailBatchSize) {
+	for batch := range slices.Chunk(ids, detailBatchSize) {
 		if len(cmds) == slots {
 			break
 		}
@@ -125,10 +130,11 @@ func (m Model) handleDetailsDone(msg detailsDoneMsg) (Model, tea.Cmd) {
 
 		m.detailErr = msg.err
 
-		return m, nil
+		return m.backOff().scheduleRefresh()
 	}
 
 	m.detailErr = nil
+	m = m.adjustInterval(msg.details)
 
 	for _, id := range msg.ids {
 		m.fetched[id] = fetchDone
@@ -140,7 +146,26 @@ func (m Model) handleDetailsDone(msg detailsDoneMsg) (Model, tea.Cmd) {
 
 	m = m.withStoredDetails().refreshRows()
 
-	return m.fetchDetails()
+	m, fetch := m.fetchDetails()
+	m, next := m.scheduleRefresh()
+
+	return m, tea.Batch(fetch, next)
+}
+
+// adjustInterval returns polling to its base rate when any detail differs from
+// the last known one, and slows it down when none does.
+func (m Model) adjustInterval(details []github.Detail) Model {
+	for _, detail := range details {
+		old, known := m.details[detail.ID]
+		if !known || old.Checks != detail.Checks || old.MergeState != detail.MergeState ||
+			!slices.Equal(old.Pending, detail.Pending) {
+			m.refreshInterval = m.refreshEvery
+
+			return m
+		}
+	}
+
+	return m.backOff()
 }
 
 // withStoredDetails fills in every listed PR whose details are known, however
