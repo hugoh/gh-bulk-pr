@@ -27,6 +27,8 @@ func TestPrNumber(t *testing.T) {
 	assert.Equal(t, "#0", prNumber(0))
 }
 
+const wordPending = "pending"
+
 func TestChecksDisplay(t *testing.T) {
 	t.Parallel()
 
@@ -34,9 +36,10 @@ func TestChecksDisplay(t *testing.T) {
 		pr   github.PR
 		want string
 	}{
-		"fail": {github.PR{Checks: github.ChecksFail}, "✗"},
-		"pass": {github.PR{Checks: github.ChecksPass}, "✓"},
-		"none": {github.PR{}, "-"},
+		"fail":      {github.PR{Checks: github.ChecksFail}, "✗"},
+		"pass":      {github.PR{Checks: github.ChecksPass}, "✓"},
+		wordPending: {github.PR{Checks: github.ChecksPending}, "●"},
+		"none":      {github.PR{}, "-"},
 	}
 
 	for name, tt := range tests {
@@ -56,9 +59,10 @@ func TestPreviewChecks(t *testing.T) {
 		pr   github.PR
 		want string
 	}{
-		"failing": {github.PR{Checks: github.ChecksFail}, "failing"},
-		"passing": {github.PR{Checks: github.ChecksPass}, checksPassingWord},
-		"none":    {github.PR{}, "no checks"},
+		"failing":   {github.PR{Checks: github.ChecksFail}, "failing"},
+		"passing":   {github.PR{Checks: github.ChecksPass}, checksPassingWord},
+		wordPending: {github.PR{Checks: github.ChecksPending}, wordPending},
+		"none":      {github.PR{}, "no checks"},
 	}
 
 	for name, tt := range tests {
@@ -95,9 +99,9 @@ func TestPreviewText(t *testing.T) {
 		Body:       "some description",
 	}
 
-	got := previewText(pr)
+	got := previewText(pr, pr.Body)
 	assert.NotContains(t, got, "auto-merge")
-	assert.Contains(t, ansi.Strip(previewText(github.PR{AutoMerge: true})), "auto-merge")
+	assert.Contains(t, ansi.Strip(previewText(github.PR{AutoMerge: true}, "")), "auto-merge")
 	assert.Contains(t, got, "merge: behind")
 	assert.Contains(t, got, prTitleFix)
 	assert.Contains(t, got, testRepoA)
@@ -105,19 +109,6 @@ func TestPreviewText(t *testing.T) {
 	assert.Contains(t, got, "bug, priority")
 	assert.Contains(t, got, "alice")
 	assert.Contains(t, got, "some description")
-}
-
-func TestPreviewText_TruncatesLongBody(t *testing.T) {
-	t.Parallel()
-
-	longBody := make([]byte, previewBodyLimit+100)
-	for i := range longBody {
-		longBody[i] = 'a'
-	}
-
-	got := previewText(github.PR{Body: string(longBody)})
-	assert.Contains(t, got, "…")
-	assert.NotContains(t, got, string(longBody))
 }
 
 func TestViewList_Loading(t *testing.T) {
@@ -1054,4 +1045,36 @@ func TestViewList_HeaderSeparatesTabsFromQuery(t *testing.T) {
 	header, _, _ := strings.Cut(ansi.Strip(m.View().Content), "\n")
 
 	assert.Contains(t, header, tabs()[1].name+" │ "+tabs()[0].query)
+}
+
+func TestColorChecks_ColorsPendingGlyph(t *testing.T) {
+	t.Parallel()
+
+	assert.Contains(t, colorChecks("row ●"), previewLabelStyle().Render("●"))
+}
+
+func TestPreviewText_ListsWhatItWaitsOn(t *testing.T) {
+	t.Parallel()
+
+	got := previewText(github.PR{
+		Checks:  github.ChecksPending,
+		Pending: []string{"renovate/stability-days", "build"},
+	}, "")
+
+	assert.Contains(t, got, "waiting on:")
+	assert.Contains(t, got, "renovate/stability-days, build")
+	assert.NotContains(t, previewText(github.PR{Checks: github.ChecksPass}, ""), "waiting on:")
+}
+
+func TestPendingSummary(t *testing.T) {
+	t.Parallel()
+
+	prs := []github.PR{
+		{Checks: github.ChecksPending},
+		{Checks: github.ChecksPending},
+		{Checks: github.ChecksPass},
+	}
+
+	assert.Equal(t, "2 waiting", pendingSummary(prs))
+	assert.Empty(t, pendingSummary(prs[2:]))
 }

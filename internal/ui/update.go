@@ -24,7 +24,7 @@ const (
 // Update handles bubbletea messages: window resizes, search/action results,
 // and key presses, routed by the current screen.
 //
-//nolint:ireturn // Update must satisfy the tea.Model interface
+//nolint:ireturn,cyclop // Update must satisfy the tea.Model interface
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -33,6 +33,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleSearchDone(msg).fetchDetails()
 	case detailsDoneMsg:
 		return m.handleDetailsDone(msg)
+	case autoRefreshMsg:
+		return m.handleAutoRefresh()
 	case modelMsg:
 		return msg.applyTo(m), nil
 	case actionDoneMsg:
@@ -349,6 +351,7 @@ func (m Model) reload() (Model, tea.Cmd) {
 	m.fetched = map[string]fetchState{}
 	m.fetching = 0
 	m.detailErr = nil
+	m.refreshInterval = m.refreshEvery
 	m.searchID++
 	m.loading = true
 	m.loadingMore = false

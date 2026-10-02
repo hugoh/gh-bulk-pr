@@ -16,12 +16,18 @@ import (
 )
 
 const (
-	previewBodyLimit = 500
-	mergeBehind      = "BEHIND"
-	mergeDirty       = "DIRTY"
-	labelBehind      = "behind"
-	labelConflict    = "conflict"
-	labelBlocked     = "blocked"
+	mergeBehind   = "BEHIND"
+	mergeDirty    = "DIRTY"
+	labelBehind   = "behind"
+	labelConflict = "conflict"
+	labelBlocked  = "blocked"
+)
+
+// previewSeparatorLines and previewBoxPadding are the rule above the preview
+// and the box's left and right padding.
+const (
+	previewSeparatorLines = 1
+	previewBoxPadding     = 2
 )
 
 func prNumber(n int) string { return "#" + strconv.Itoa(n) }
@@ -32,6 +38,8 @@ func checksDisplay(pr github.PR) (string, string, lipgloss.Style) {
 		return "✗", "failing", errStyle()
 	case github.ChecksPass:
 		return "✓", "passing", okStyle()
+	case github.ChecksPending:
+		return "●", "pending", previewLabelStyle()
 	default:
 		return "-", "no checks", helpStyle()
 	}
@@ -48,7 +56,7 @@ func mergeStates() []struct{ state, label string } {
 		{"UNSTABLE", "unstable"},
 		{"DRAFT", "draft"},
 		{"HAS_HOOKS", "hooks"},
-		{"UNKNOWN", "unknown"},
+		{github.MergeUnknown, "unknown"},
 	}
 }
 
@@ -78,6 +86,23 @@ func mergeSummary(prs []github.PR) string {
 	}
 
 	return strings.Join(parts, " · ")
+}
+
+// pendingSummary counts PRs whose checks are still pending, e.g. "2 waiting".
+func pendingSummary(prs []github.PR) string {
+	count := 0
+
+	for _, pr := range prs {
+		if pr.Checks == github.ChecksPending {
+			count++
+		}
+	}
+
+	if count == 0 {
+		return ""
+	}
+
+	return fmt.Sprintf("%d waiting", count)
 }
 
 // selectedRowPrefix is the escape sequence the table opens the cursor row with,
@@ -161,13 +186,16 @@ func colorChecks(rendered string) string {
 
 	lines := strings.Split(rendered, "\n")
 	for idx, line := range lines {
-		pass, fail, restore := okStyle(), errStyle(), ""
+		pass, fail, wait, restore := okStyle(), errStyle(), previewLabelStyle(), ""
 		if sel != "" && strings.HasPrefix(line, sel) {
-			pass, fail, restore = onCursor(pass), onCursor(fail), sel
+			pass, fail, wait, restore = onCursor(pass), onCursor(fail), onCursor(wait), sel
 		}
 
-		lines[idx] = strings.NewReplacer("✓", pass.Render("✓")+restore, "✗", fail.Render("✗")+restore).
-			Replace(line)
+		lines[idx] = strings.NewReplacer(
+			"✓", pass.Render("✓")+restore,
+			"✗", fail.Render("✗")+restore,
+			"●", wait.Render("●")+restore,
+		).Replace(line)
 	}
 
 	return strings.Join(lines, "\n")
@@ -283,7 +311,7 @@ func (m Model) listWithPreview() string {
 
 	if pr, ok := m.focusedPR(); ok && m.previewOpen {
 		sep := separatorStyle().Render(strings.Repeat("─", max(lipgloss.Width(list), 1)))
-		list = lipgloss.JoinVertical(lipgloss.Left, list, sep, previewText(pr))
+		list = lipgloss.JoinVertical(lipgloss.Left, list, sep, m.previewPanel(pr))
 	}
 
 	return list
@@ -350,6 +378,10 @@ func (m Model) statusLine() string {
 
 	if summary := mergeSummary(m.prs); summary != "" {
 		parts = append(parts, helpStyle().Render(summary))
+	}
+
+	if waiting := pendingSummary(m.prs); waiting != "" {
+		parts = append(parts, helpStyle().Render(waiting))
 	}
 
 	if position := m.positionText(); position != "" {
@@ -478,7 +510,9 @@ func previewMerge(item github.PR) string {
 	return mergeStyle(label).Render(text)
 }
 
-func previewText(item github.PR) string {
+// previewHead is the preview above its body: title, status, labels and
+// reviewers.
+func previewHead(item github.PR) string {
 	var buf strings.Builder
 	buf.WriteString(previewTitleStyle().Render(item.Title) + "\n")
 	fmt.Fprintf(
@@ -498,6 +532,15 @@ func previewText(item github.PR) string {
 		)
 	}
 
+	if len(item.Pending) > 0 {
+		fmt.Fprintf(
+			&buf,
+			"%s %s\n",
+			helpStyle().Render("waiting on:"),
+			previewLabelStyle().Render(strings.Join(item.Pending, ", ")),
+		)
+	}
+
 	if len(item.Reviewers) > 0 {
 		fmt.Fprintf(
 			&buf,
@@ -509,14 +552,24 @@ func previewText(item github.PR) string {
 
 	buf.WriteString("\n")
 
-	body := item.Body
-	if len(body) > previewBodyLimit {
-		body = body[:previewBodyLimit] + "…"
-	}
+	return buf.String()
+}
 
-	buf.WriteString(body)
+func previewText(item github.PR, body string) string {
+	return previewBoxStyle().Render(previewHead(item) + body)
+}
 
-	return previewBoxStyle().Render(buf.String())
+// previewPanel is the preview of item, its body rendered as Markdown and cut
+// to the lines left under the list.
+func (m Model) previewPanel(item github.PR) string {
+	head := previewHead(item)
+	lines := max(
+		m.height-previewHeightMargin-m.table.Height()-previewSeparatorLines-lipgloss.Height(head),
+		1,
+	)
+	body := m.markdown.body(item, max(m.width-previewBoxPadding, 1), lines)
+
+	return previewText(item, body)
 }
 
 // paneChrome is the lines around the confirm/results list: the pinned
