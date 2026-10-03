@@ -68,7 +68,7 @@ Queries run from the filter bar or a tab are appended to `$XDG_STATE_HOME/gh-bul
 
 Results load 50 at a time: the next page is fetched as you scroll near the bottom, and the header shows how many are loaded (`50 of 312`). GitHub search returns at most 1000 results, so narrow the query (`updated:>2026-01-01`, `repo:`, `author:`) for anything bigger. `ctrl+a` selects the loaded rows only, and the footer shows `N selected of M`. `r` reloads from the first page.
 
-Every action asks for confirmation before running. Close and merge need an explicit `y`; labelling also accepts `enter`. `n` or `esc` cancels. The confirm and results lists scroll (`j`/`k`, `g`/`G`, page keys), and failed PRs are listed first in the results. The app needs a terminal of at least 97 columns by 11 rows.
+Every action asks for confirmation before running. Close and merge need an explicit `y`; labelling also accepts `enter`. `n` or `esc` cancels. The confirm and results lists scroll (`j`/`k`, `g`/`G`, page keys), and failed PRs are listed first in the results. The app needs a terminal of at least 99 columns by 11 rows.
 
 ## Development
 

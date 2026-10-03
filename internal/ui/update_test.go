@@ -52,7 +52,7 @@ func testPRs() []github.PR {
 // cursor to test against.
 func loadedModel() Model {
 	m := New(nil, "is:open is:pr")
-	m = m.handleResize(tea.WindowSizeMsg{Width: 100, Height: 30})
+	m = m.handleResize(tea.WindowSizeMsg{Width: 110, Height: 30})
 	m = m.handleSearchDone(searchDoneMsg{PRs: testPRs()})
 
 	return m
@@ -568,7 +568,7 @@ func TestRowsFor(t *testing.T) {
 
 	require.Len(t, rows, 2)
 	assert.Equal(t, " ", rows[0][0])
-	assert.Equal(t, "x", rows[1][0])
+	assert.Equal(t, "◆", rows[1][0])
 	assert.Equal(t, "#1", rows[0][2])
 	assert.Equal(t, "behind", rows[0][5])
 	assert.Empty(t, rows[0][6], "no auto-merge cell when it is off")
@@ -785,7 +785,7 @@ func TestHandleListKey_ToggleSelection_SameNumberInDifferentRepos(t *testing.T) 
 	t.Parallel()
 
 	m := New(nil, "is:open is:pr")
-	m = m.handleResize(tea.WindowSizeMsg{Width: 100, Height: 30})
+	m = m.handleResize(tea.WindowSizeMsg{Width: 110, Height: 30})
 	m = m.handleSearchDone(searchDoneMsg{
 		PRs: []github.PR{
 			{Number: 7, Title: "First", Repo: testRepoA, Author: testAuthor},
@@ -868,7 +868,7 @@ func TestListKey_ToggleState_WithoutStateSaysSo(t *testing.T) {
 	t.Parallel()
 
 	m := New(nil, "is:pr author:hugoh")
-	m = m.handleResize(tea.WindowSizeMsg{Width: 100, Height: 30})
+	m = m.handleResize(tea.WindowSizeMsg{Width: 110, Height: 30})
 
 	m, cmd := m.handleListKeyByString("s")
 	assert.Equal(t, "is:pr author:hugoh", m.query)
@@ -1146,7 +1146,7 @@ func manyPRs(first, count int, detailed bool) []github.PR {
 
 // pagedModel is a loaded first page of 50 out of 312 matches.
 func pagedModel() Model {
-	m := New(nil, "q").handleResize(tea.WindowSizeMsg{Width: 100, Height: 30})
+	m := New(nil, "q").handleResize(tea.WindowSizeMsg{Width: 110, Height: 30})
 
 	return m.handleSearchDone(searchDoneMsg{
 		PRs: manyPRs(1, 50, true), Total: 312, EndCursor: "c1", HasNext: true,
