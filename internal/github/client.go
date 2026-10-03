@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/cli/go-gh/v2/pkg/api"
 )
@@ -16,6 +17,7 @@ import (
 type PR struct {
 	ID         string // GraphQL node ID, which the auto-merge mutations need
 	Number     int
+	UpdatedAt  time.Time
 	Title      string
 	Repo       string // "owner/name"
 	Author     string
@@ -119,6 +121,7 @@ query($q: String!, $count: Int!, $after: String) {
       ... on PullRequest {
         id
         number
+        updatedAt
         title
         url
         repository { nameWithOwner }
@@ -172,6 +175,7 @@ type searchNode struct {
 	ID               string
 	AutoMergeRequest *struct{ EnabledAt string }
 	Number           int
+	UpdatedAt        time.Time
 	Title            string
 	URL              string
 	Repository       struct{ NameWithOwner string }
@@ -270,6 +274,7 @@ func prFromNode(node searchNode) PR {
 		ID:        node.ID,
 		AutoMerge: node.AutoMergeRequest != nil,
 		Number:    node.Number,
+		UpdatedAt: node.UpdatedAt,
 		Title:     node.Title,
 		Repo:      node.Repository.NameWithOwner,
 		Author:    node.Author.Login,

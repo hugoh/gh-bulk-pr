@@ -121,7 +121,7 @@ func TestViewList_Loading(t *testing.T) {
 func TestViewList_LoadingShowsTableAndLeftSpinner(t *testing.T) {
 	t.Parallel()
 
-	m := New(nil, "is:open is:pr").handleResize(tea.WindowSizeMsg{Width: 100, Height: 30})
+	m := New(nil, "is:open is:pr").handleResize(tea.WindowSizeMsg{Width: 110, Height: 30})
 	lines := strings.Split(ansi.Strip(m.View().Content), "\n")
 
 	assert.Contains(t, lines[0], "gh-bulk-pr")
@@ -325,7 +325,7 @@ func TestMergeStyle(t *testing.T) {
 func TestColorMerge_ColorsOnlyTheMergeColumn(t *testing.T) {
 	t.Parallel()
 
-	m := New(nil, "q").handleResize(tea.WindowSizeMsg{Width: 100, Height: 30})
+	m := New(nil, "q").handleResize(tea.WindowSizeMsg{Width: 110, Height: 30})
 	m = m.handleSearchDone(searchDoneMsg{
 		PRs: []github.PR{
 			{
@@ -448,7 +448,7 @@ func TestViewList_StatusOnSecondLine(t *testing.T) {
 func TestViewList_EmptyResultKeepsSpacerLine(t *testing.T) {
 	t.Parallel()
 
-	m := New(nil, "q").handleResize(tea.WindowSizeMsg{Width: 100, Height: 30})
+	m := New(nil, "q").handleResize(tea.WindowSizeMsg{Width: 110, Height: 30})
 	m = m.handleSearchDone(searchDoneMsg{PRs: nil})
 
 	lines := strings.Split(m.View().Content, "\n")
@@ -462,7 +462,7 @@ func TestViewList_StatusIsRightAligned(t *testing.T) {
 
 	line := strings.Split(pagedModel().View().Content, "\n")[1]
 
-	assert.Equal(t, 100, lipgloss.Width(line), "padded to the full width")
+	assert.Equal(t, 110, lipgloss.Width(line), "padded to the full width")
 	assert.True(t, strings.HasSuffix(strings.TrimRight(ansi.Strip(line), " "), "50 loaded"))
 	assert.True(t, strings.HasPrefix(line, " "), "text sits at the right, not the left")
 }
@@ -631,7 +631,7 @@ func TestView_NeverWiderThanTheTerminal(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.LessOrEqual(t, maxLineWidth(build().View().Content), 100)
+			assert.LessOrEqual(t, maxLineWidth(build().View().Content), 110)
 		})
 	}
 }
@@ -645,7 +645,7 @@ func TestView_TerminalTooSmall(t *testing.T) {
 	}{
 		"big enough":       {width: minWidth, height: minHeight, want: false},
 		"one column short": {width: minWidth - 1, height: 30, want: true},
-		"one row short":    {width: 100, height: minHeight - 1, want: true},
+		"one row short":    {width: 110, height: minHeight - 1, want: true},
 	}
 
 	for name, tt := range tests {
@@ -881,7 +881,7 @@ func TestLabelPrompt_KeepsTheListVisible(t *testing.T) {
 func TestPrompt_ShownWhileTheFirstSearchIsStillLoading(t *testing.T) {
 	t.Parallel()
 
-	m := New(nil, "q").handleResize(tea.WindowSizeMsg{Width: 100, Height: 30})
+	m := New(nil, "q").handleResize(tea.WindowSizeMsg{Width: 110, Height: 30})
 	m, _ = m.startFilter()
 
 	view := m.View().Content
