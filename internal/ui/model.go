@@ -106,22 +106,26 @@ type Model struct {
 	loading     bool  // first page of a search in flight
 	loadingMore bool  // a further page in flight
 
+	lastUpdated time.Time // when the list data last arrived; zero before the first result
+
 	width, height int
 }
 
 const (
-	colSelect   = 1
-	colRepo     = 22
-	colNumber   = 6
-	colTitleMin = 20
-	colChecks   = 8
-	colMerge    = 8
-	colAuto     = 4
-	colAuthor   = 12
-	numCols     = 8
-	cellPadding = 2 // bubbles/table's default Cell style: Padding(0, 1), left+right
+	colSelect     = 1
+	colRepo       = 22
+	colNumber     = 6
+	colTitleMin   = 20
+	colChecks     = 2 // the compact width, used when the terminal is narrow
+	colChecksFull = 8
+	colMerge      = 8
+	colAuto       = 4
+	colAuthor     = 12
+	colActive     = 6
+	numCols       = 9
+	cellPadding   = 2 // bubbles/table's default Cell style: Padding(0, 1), left+right
 
-	fixedColsSum       = colSelect + colRepo + colNumber + colChecks + colMerge + colAuto + colAuthor
+	fixedColsSum       = colSelect + colRepo + colNumber + colChecks + colMerge + colAuto + colAuthor + colActive
 	tableOverhead      = numCols * cellPadding
 	defaultTableHeight = 20
 )
@@ -138,10 +142,11 @@ func columnsForWidth(width int) []table.Column {
 		{Title: "Repo", Width: colRepo},
 		{Title: "#", Width: colNumber},
 		{Title: "Title", Width: titleWidth},
-		{Title: "Checks", Width: colChecks},
+		{Title: "CI", Width: colChecks},
 		{Title: "Merge", Width: colMerge},
 		{Title: "Auto", Width: colAuto},
 		{Title: "Author", Width: colAuthor},
+		{Title: "Active", Width: colActive},
 	}
 }
 
@@ -214,7 +219,7 @@ func (m Model) WithMouse(enabled bool) Model {
 
 // Init kicks off the first PR search and starts the loading spinner.
 func (m Model) Init() tea.Cmd {
-	return m.searchCmds(context.Background())
+	return tea.Batch(m.searchCmds(context.Background()), clockTick())
 }
 
 func newHelp() help.Model {

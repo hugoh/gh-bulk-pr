@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/table"
 	tea "charm.land/bubbletea/v2"
@@ -262,7 +263,7 @@ func fit(s string, width int) string {
 func (m Model) render() string {
 	switch m.screen {
 	case screenList:
-		return m.viewList(footerStyle().Render(m.footerText()))
+		return m.viewList(m.footerLine())
 	case screenFilter, screenActionInput:
 		return m.viewPrompt()
 	case screenConfirm:
@@ -483,6 +484,19 @@ func (m Model) footerText() string {
 	// The help widget only truncates when it has room for its ellipsis, so
 	// fit has the last word.
 	return fit(prefix+m.help.ShortHelpView(bindings), m.width-footerPadding)
+}
+
+// footerLine is the key hints with how stale the list is, right-aligned.
+func (m Model) footerLine() string {
+	stamp := ""
+	if !m.lastUpdated.IsZero() {
+		stamp = "last updated " + ago(time.Since(m.lastUpdated))
+	}
+
+	gap := max(m.width-footerPadding-lipgloss.Width(stamp), 0)
+	hints := fit(m.footerText(), gap-1)
+
+	return footerStyle().Render(hints + strings.Repeat(" ", max(gap-lipgloss.Width(hints), 0)) + stamp)
 }
 
 func (m Model) viewHelp() string {

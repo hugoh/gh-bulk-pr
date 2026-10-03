@@ -3,6 +3,7 @@ package ui
 import (
 	"cmp"
 	"slices"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/hugoh/gh-bulk-pr/internal/github"
@@ -144,6 +145,7 @@ func (m Model) handleDetailsDone(msg detailsDoneMsg) (Model, tea.Cmd) {
 		m.details[detail.ID] = detail
 	}
 
+	m.lastUpdated = time.Now()
 	m = m.withStoredDetails().refreshRows()
 
 	m, fetch := m.fetchDetails()

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"sync/atomic"
+	"time"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
@@ -33,6 +34,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleSearchDone(msg).fetchDetails()
 	case detailsDoneMsg:
 		return m.handleDetailsDone(msg)
+	case clockTickMsg:
+		return m, clockTick()
 	case autoRefreshMsg:
 		return m.handleAutoRefresh()
 	case modelMsg:
@@ -221,6 +224,7 @@ func (m Model) handleSearchDone(msg searchDoneMsg) Model {
 		m.selected = survivingSelection(m.selected, m.prs)
 		m = m.storePaging(msg)
 		m = m.refreshRows()
+		m.lastUpdated = time.Now()
 	}
 
 	return m
@@ -244,6 +248,7 @@ func (m Model) handleMoreDone(msg searchDoneMsg) Model {
 	m.prs = appendNew(m.prs, msg.PRs)
 	m = m.withStoredDetails()
 	m = m.storePaging(msg)
+	m.lastUpdated = time.Now()
 
 	return m.refreshRows()
 }
@@ -789,7 +794,7 @@ func rowsFor(prs []github.PR, selected map[prKey]bool) []table.Row {
 	for idx, entry := range prs {
 		mark := " "
 		if selected[keyOf(entry)] {
-			mark = "x"
+			mark = "◆"
 		}
 
 		checks, merge := pendingCell, pendingCell
@@ -812,6 +817,7 @@ func rowsFor(prs []github.PR, selected map[prKey]bool) []table.Row {
 			merge,
 			auto,
 			entry.Author,
+			age(entry.UpdatedAt),
 		}
 	}
 
