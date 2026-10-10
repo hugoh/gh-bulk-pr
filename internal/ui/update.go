@@ -327,7 +327,9 @@ func (m Model) handleResultsKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 
 	if msg.String() == keyEnter || msg.String() == keyEsc {
 		m.screen = screenList
-		m = m.withResults(github.Page{})
+		kept := withoutSucceeded(m.prs, m.results)
+		m.total = max(m.total-(len(m.prs)-len(kept)), 0)
+		m.prs = kept
 		m.selected = map[prKey]bool{}
 		delete(m.cache, m.query)
 		m = m.refreshRows()
@@ -336,6 +338,20 @@ func (m Model) handleResultsKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	}
 
 	return m.scrollPane(msg, m.resultsBody()), nil
+}
+
+// withoutSucceeded drops the PRs an action just handled, so the list stays
+// populated while the reload runs without showing them in their old state.
+func withoutSucceeded(prs []github.PR, results []worker.Result) []github.PR {
+	done := map[prKey]bool{}
+
+	for _, r := range results {
+		if r.Err == nil {
+			done[keyOf(r.PR)] = true
+		}
+	}
+
+	return slices.DeleteFunc(slices.Clone(prs), func(pr github.PR) bool { return done[keyOf(pr)] })
 }
 
 // reload starts a fresh search for the current query, cancelling any still

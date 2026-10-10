@@ -1078,3 +1078,44 @@ func TestPendingSummary(t *testing.T) {
 	assert.Equal(t, "2 waiting", pendingSummary(prs))
 	assert.Empty(t, pendingSummary(prs[2:]))
 }
+
+func TestLeavingResultsKeepsRowsExceptSucceeded(t *testing.T) {
+	t.Parallel()
+
+	m := loadedModel()
+	require.GreaterOrEqual(t, len(m.prs), 2)
+
+	done, failed := m.prs[0], m.prs[1]
+	m.screen = screenResults
+	m.total = 10
+	m.results = []worker.Result{{PR: done}, {PR: failed, Err: errors.New("boom")}}
+
+	m, cmd := m.handleResultsKey(keyMsgFromString("enter"))
+
+	assert.NotNil(t, cmd, "a fresh search starts")
+	assert.True(t, m.loading)
+	assert.Equal(t, screenList, m.screen)
+	assert.NotContains(t, m.prs, done)
+	assert.Contains(t, m.prs, failed)
+	assert.Len(t, m.prs, len(testPRs())-1)
+	assert.Equal(t, 9, m.total, "the total drops with the removed rows while reloading")
+}
+
+func TestViewAfterLeavingResultsShowsRefreshingAndReducedTotal(t *testing.T) {
+	t.Parallel()
+
+	m := loadedModel()
+	m.total = 10
+	m.screen = screenResults
+	succeeded, failed := m.prs[0], m.prs[1]
+	m.results = []worker.Result{{PR: succeeded}, {PR: failed, Err: errors.New("boom")}}
+
+	m, _ = m.handleResultsKey(keyMsgFromString("enter"))
+
+	view := m.View().Content
+	assert.NotContains(t, view, succeeded.Title)
+	assert.Contains(t, view, failed.Title, "a failed PR stays listed")
+	assert.Contains(t, view, "refreshing…")
+	assert.Contains(t, view, "of 9")
+	assert.NotContains(t, view, "of 10")
+}
