@@ -591,6 +591,13 @@ func (m Model) startAction(actionKey string) (Model, tea.Cmd) {
 		return m, nil
 	}
 
+	if actionKey == "a" &&
+		slices.ContainsFunc(m.targetPRs(), func(pr github.PR) bool { return !pr.Detailed }) {
+		m.notice = "still loading PR details: try again in a moment"
+
+		return m, nil
+	}
+
 	m.action = actionsForKey(m.client, actionKey, "")
 	if m.action != nil && m.action.note != nil {
 		note := m.action.note

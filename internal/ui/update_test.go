@@ -269,6 +269,17 @@ func TestHandleListKey_PreviewNeedsFocusedPR(t *testing.T) {
 	}
 }
 
+func TestStartAction_AutoMergeNeedsLoadedDetails(t *testing.T) {
+	t.Parallel()
+
+	m := loadedModel()
+	m.prs[0].Detailed = false
+
+	m, _ = m.handleListKeyByString("a")
+	assert.Equal(t, screenList, m.screen)
+	assert.NotEmpty(t, m.notice)
+}
+
 func TestHandleListKey_TogglePreviewResizesTable(t *testing.T) {
 	t.Parallel()
 
