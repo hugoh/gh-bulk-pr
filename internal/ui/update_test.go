@@ -1911,3 +1911,25 @@ func TestCopyFocusedURL(t *testing.T) {
 	_, cmd = m.handleListKeyByString("y")
 	require.Nil(t, cmd)
 }
+
+func TestListKey_ToggleAuthor(t *testing.T) {
+	t.Parallel()
+
+	m := loadedModel()
+	start := m.query
+
+	m, cmd := m.handleListKeyByString("A")
+	assert.Contains(t, strings.Fields(m.query), "author:@me")
+	assert.True(t, m.loading)
+	require.NotNil(t, cmd)
+
+	m, _ = m.handleListKeyByString("A")
+	assert.Equal(t, start, m.query)
+}
+
+func TestToggleTerm(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, "is:pr x", toggleTerm("is:pr  x", "y")[:len("is:pr x")])
+	assert.Equal(t, "is:pr x", toggleTerm("is:pr x y", "y"))
+}
