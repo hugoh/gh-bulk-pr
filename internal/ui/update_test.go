@@ -1132,7 +1132,7 @@ func TestFinishingActionForcesFullReload(t *testing.T) {
 
 	m, _ = m.handleResultsKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 
-	assert.Empty(t, m.prs, "acted-on PRs must not linger as stale rows")
+	assert.Len(t, m.prs, len(testPRs()), "rows the action didn't touch stay while reloading")
 	assert.Empty(t, m.selected)
 	assert.NotContains(t, m.cache, m.query)
 	assert.True(t, m.loading)
