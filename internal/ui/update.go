@@ -382,6 +382,21 @@ func (m Model) reload() (Model, tea.Cmd) {
 	return m, m.searchCmds(ctx)
 }
 
+// refreshAll reloads the whole list and, without waiting for it, re-fetches
+// the details of the focused PR.
+func (m Model) refreshAll() (Model, tea.Cmd) {
+	m, search := m.reload()
+
+	pr, ok := m.focusedPR()
+	if !ok || pr.ID == "" {
+		return m, search
+	}
+
+	m, focused := m.fetchIDs([]string{pr.ID})
+
+	return m, tea.Batch(search, focused)
+}
+
 func (m Model) withResults(page github.Page) Model {
 	m.prs, m.total, m.endCursor, m.hasMore = page.PRs, page.Total, page.EndCursor, page.HasNext
 
@@ -425,7 +440,7 @@ func (m Model) handleListKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	case key.Matches(msg, keys.SelectAll):
 		return m.selectAll()
 	case key.Matches(msg, keys.Refresh):
-		return m.reload()
+		return m.refreshAll()
 	case key.Matches(
 		msg, keys.Checks, keys.Open, keys.OpenAll, keys.Copy, keys.State, keys.Tab,
 		keys.Label, keys.Close, keys.Merge, keys.AutoMerge, keys.Update,

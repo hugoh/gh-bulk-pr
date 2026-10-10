@@ -307,6 +307,22 @@ func TestHandleListKey_RefreshReloadsPRs(t *testing.T) {
 	assert.NotNil(t, cmd)
 }
 
+func TestHandleListKey_RefreshFetchesFocusedDetailsAlongsideReload(t *testing.T) {
+	t.Parallel()
+
+	m := loadedModel()
+	m.prs[1].ID = "PR_2"
+	m, _ = m.handleListKeyByString("j")
+	focused, ok := m.focusedPR()
+	require.True(t, ok)
+
+	m, _ = m.handleListKeyByString("r")
+
+	assert.True(t, m.loading)
+	assert.Equal(t, fetchInflight, m.fetched[focused.ID], "focused PR is refreshed right away")
+	assert.Equal(t, 1, m.fetching)
+}
+
 func TestHandleListKey_StartAction_NoSelectionTargetsFocused(t *testing.T) {
 	t.Parallel()
 
