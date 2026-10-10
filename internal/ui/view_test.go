@@ -445,7 +445,7 @@ func TestViewList_StatusOnSecondLine(t *testing.T) {
 	}
 }
 
-func TestViewList_EmptyResultKeepsSpacerLine(t *testing.T) {
+func TestViewList_EmptyResultSaysNoMatches(t *testing.T) {
 	t.Parallel()
 
 	m := New(nil, "q").handleResize(tea.WindowSizeMsg{Width: 110, Height: 30})
@@ -453,8 +453,8 @@ func TestViewList_EmptyResultKeepsSpacerLine(t *testing.T) {
 
 	lines := strings.Split(m.View().Content, "\n")
 
-	assert.Empty(t, strings.TrimSpace(lines[1]))
-	assert.Contains(t, lines[2], "Repo", "table header follows the spacer")
+	assert.Contains(t, lines[1], "No pull requests match")
+	assert.Contains(t, lines[2], "Repo", "table header follows the status line")
 }
 
 func TestViewList_StatusIsRightAligned(t *testing.T) {

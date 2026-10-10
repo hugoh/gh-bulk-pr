@@ -405,9 +405,14 @@ func (m Model) statusLine() string {
 }
 
 // loadingText is the spinner shown on the left of the status line while a
-// search is in flight: "loading" until there are rows, "refreshing" after.
+// search is in flight: "loading" until there are rows, "refreshing" after. Once
+// a search has finished with no rows it says so instead.
 func (m Model) loadingText() string {
 	if !m.loading {
+		if len(m.prs) == 0 {
+			return helpStyle().Render(" No pull requests match this search")
+		}
+
 		return ""
 	}
 
