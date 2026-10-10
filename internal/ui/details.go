@@ -114,7 +114,7 @@ func (m Model) fetchIDs(ids []string) (Model, tea.Cmd) {
 		cmds = append(cmds, m.detailsCmd(batch))
 	}
 
-	return m, tea.Batch(cmds...)
+	return m.refreshRows(), tea.Batch(cmds...)
 }
 
 func (m Model) handleDetailsDone(msg detailsDoneMsg) (Model, tea.Cmd) {

@@ -20,6 +20,8 @@ const (
 	keyEnter    = "enter"
 	keyEsc      = "esc"
 	pendingCell = "…"
+	// refreshingMark flags a row whose details are stale or being re-fetched.
+	refreshingMark = "↻"
 )
 
 // Update handles bubbletea messages: window resizes, search/action results,
@@ -807,7 +809,7 @@ func (m Model) targetPRs() []github.PR {
 }
 
 func (m Model) refreshRows() Model {
-	m.table.SetRows(rowsFor(m.prs, m.selected))
+	m.table.SetRows(rowsFor(m.prs, m.selected, m.fetched))
 
 	return m
 }
@@ -835,12 +837,17 @@ func (m Model) applyOnDone(results []worker.Result) Model {
 
 // rowsFor builds the table rows; for PRs that aren't detailed yet, the checks
 // and merge cells are placeholders because the light search doesn't fetch them.
-func rowsFor(prs []github.PR, selected map[prKey]bool) []table.Row {
+// A detailed PR whose merge state GitHub hasn't worked out yet, or whose
+// details are being re-fetched, gets refreshingMark. Pending checks don't:
+// they can stay pending for days.
+func rowsFor(prs []github.PR, selected map[prKey]bool, fetched map[string]fetchState) []table.Row {
 	rows := make([]table.Row, len(prs))
 	for idx, entry := range prs {
 		mark := " "
 		if selected[keyOf(entry)] {
 			mark = "◆"
+		} else if entry.Detailed && (entry.MergeState == github.MergeUnknown || fetched[entry.ID] == fetchInflight) {
+			mark = refreshingMark
 		}
 
 		checks, merge := pendingCell, pendingCell

@@ -603,7 +603,7 @@ func TestRowsFor(t *testing.T) {
 	t.Parallel()
 
 	prs := testPRs()
-	rows := rowsFor(prs, map[prKey]bool{keyOf(prs[1]): true})
+	rows := rowsFor(prs, map[prKey]bool{keyOf(prs[1]): true}, nil)
 
 	require.Len(t, rows, 2)
 	assert.Equal(t, " ", rows[0][0])
@@ -614,11 +614,31 @@ func TestRowsFor(t *testing.T) {
 	assert.Equal(t, testAuthor, rows[0][7])
 }
 
+func TestRowsFor_MarksRowsBeingRefreshed(t *testing.T) {
+	t.Parallel()
+
+	detailed := github.PR{ID: "a", Number: 1, Detailed: true}
+	light := github.PR{ID: "b", Number: 2}
+	fetched := map[string]fetchState{"a": fetchInflight, "b": fetchInflight}
+	rows := rowsFor([]github.PR{detailed, light}, nil, fetched)
+
+	assert.Equal(t, refreshingMark, rows[0][0])
+	assert.Equal(t, " ", rows[1][0], "first-time loads aren't refreshes")
+
+	unknown := github.PR{ID: "c", Number: 3, Detailed: true, MergeState: github.MergeUnknown}
+	rows = rowsFor([]github.PR{unknown}, nil, nil)
+	assert.Equal(t, refreshingMark, rows[0][0], "an unknown merge state is marked too")
+
+	pending := github.PR{ID: "d", Number: 4}.WithDetail(pendingDetail(4))
+	rows = rowsFor([]github.PR{pending}, nil, nil)
+	assert.Equal(t, " ", rows[0][0], "pending checks alone aren't marked")
+}
+
 func TestRowsFor_ShowsAutoMerge(t *testing.T) {
 	t.Parallel()
 
 	light := github.PR{Number: 1, AutoMerge: true}
-	rows := rowsFor([]github.PR{light}, nil)
+	rows := rowsFor([]github.PR{light}, nil, nil)
 
 	assert.Equal(t, "on", rows[0][6], "auto-merge comes with the light search, before details land")
 }
