@@ -20,6 +20,8 @@ const (
 	keyEnter    = "enter"
 	keyEsc      = "esc"
 	pendingCell = "…"
+	// refreshingMark flags a row whose details are stale or being re-fetched.
+	refreshingMark = "↻"
 )
 
 // Update handles bubbletea messages: window resizes, search/action results,
@@ -382,6 +384,21 @@ func (m Model) reload() (Model, tea.Cmd) {
 	return m, m.searchCmds(ctx)
 }
 
+// refreshAll reloads the whole list and, without waiting for it, re-fetches
+// the details of the focused PR.
+func (m Model) refreshAll() (Model, tea.Cmd) {
+	m, search := m.reload()
+
+	pr, ok := m.focusedPR()
+	if !ok || pr.ID == "" {
+		return m, search
+	}
+
+	m, focused := m.fetchIDs([]string{pr.ID})
+
+	return m, tea.Batch(search, focused)
+}
+
 func (m Model) withResults(page github.Page) Model {
 	m.prs, m.total, m.endCursor, m.hasMore = page.PRs, page.Total, page.EndCursor, page.HasNext
 
@@ -425,7 +442,7 @@ func (m Model) handleListKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	case key.Matches(msg, keys.SelectAll):
 		return m.selectAll()
 	case key.Matches(msg, keys.Refresh):
-		return m.reload()
+		return m.refreshAll()
 	case key.Matches(
 		msg, keys.Checks, keys.Open, keys.OpenAll, keys.Copy, keys.State, keys.Tab,
 		keys.Label, keys.Close, keys.Merge, keys.AutoMerge, keys.Update,
@@ -792,7 +809,7 @@ func (m Model) targetPRs() []github.PR {
 }
 
 func (m Model) refreshRows() Model {
-	m.table.SetRows(rowsFor(m.prs, m.selected))
+	m.table.SetRows(rowsFor(m.prs, m.selected, m.fetched))
 
 	return m
 }
@@ -820,12 +837,17 @@ func (m Model) applyOnDone(results []worker.Result) Model {
 
 // rowsFor builds the table rows; for PRs that aren't detailed yet, the checks
 // and merge cells are placeholders because the light search doesn't fetch them.
-func rowsFor(prs []github.PR, selected map[prKey]bool) []table.Row {
+// A detailed PR whose merge state GitHub hasn't worked out yet, or whose
+// details are being re-fetched, gets refreshingMark. Pending checks don't:
+// they can stay pending for days.
+func rowsFor(prs []github.PR, selected map[prKey]bool, fetched map[string]fetchState) []table.Row {
 	rows := make([]table.Row, len(prs))
 	for idx, entry := range prs {
 		mark := " "
 		if selected[keyOf(entry)] {
 			mark = "◆"
+		} else if entry.Detailed && (entry.MergeState == github.MergeUnknown || fetched[entry.ID] == fetchInflight) {
+			mark = refreshingMark
 		}
 
 		checks, merge := pendingCell, pendingCell
