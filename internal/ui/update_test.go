@@ -257,6 +257,18 @@ func TestHandleListKey_EscClearsSelectionThenPreview(t *testing.T) {
 	assert.False(t, m.previewOpen, "esc then closes an open preview")
 }
 
+func TestHandleListKey_PreviewNeedsFocusedPR(t *testing.T) {
+	t.Parallel()
+
+	for _, k := range []string{"p", "enter"} {
+		m := New(nil, "is:open is:pr")
+		m = m.handleResize(tea.WindowSizeMsg{Width: 110, Height: 30})
+
+		m, _ = m.handleListKeyByString(k)
+		assert.False(t, m.previewOpen, k)
+	}
+}
+
 func TestHandleListKey_TogglePreviewResizesTable(t *testing.T) {
 	t.Parallel()
 

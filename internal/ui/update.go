@@ -403,10 +403,7 @@ func (m Model) handleListKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	case key.Matches(msg, keys.Clear):
 		return m.clearSelectionOrPreview()
 	case key.Matches(msg, keys.Preview):
-		m.previewOpen = !m.previewOpen
-		m = m.syncTableHeight()
-
-		return m, nil
+		return m.togglePreview(), nil
 	case key.Matches(msg, keys.Select):
 		return m.toggleFocusedSelection()
 	case key.Matches(msg, keys.SelectAll):
@@ -528,6 +525,17 @@ func (m Model) startFilter() (Model, tea.Cmd) {
 	m.filterPos = 0
 
 	return m, m.loadHistory()
+}
+
+// togglePreview opens the preview only when a PR is focused.
+func (m Model) togglePreview() Model {
+	if _, ok := m.focusedPR(); !ok && !m.previewOpen {
+		return m
+	}
+
+	m.previewOpen = !m.previewOpen
+
+	return m.syncTableHeight()
 }
 
 func (m Model) clearSelectionOrPreview() (Model, tea.Cmd) {
