@@ -48,6 +48,19 @@ func flipState(query string) (string, bool) {
 	return strings.Join(words, " "), found
 }
 
+// toggleTerm removes term from query if present, else appends it. Extra
+// whitespace is collapsed.
+func toggleTerm(query, term string) string {
+	words := strings.Fields(query)
+	if idx := slices.Index(words, term); idx >= 0 {
+		words = slices.Delete(words, idx, idx+1)
+	} else {
+		words = append(words, term)
+	}
+
+	return strings.Join(words, " ")
+}
+
 func isClosed(query string) bool {
 	return slices.Contains(strings.Fields(query), stateClosed)
 }

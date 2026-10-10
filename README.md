@@ -40,6 +40,7 @@ Press `?` in the app for this list.
 | `enter/p` | preview |
 | `/` | filter |
 | `s` | open/closed |
+| `A` | my PRs |
 | `1/2` | tab |
 | `r` | refresh |
 | `T` | checks |
