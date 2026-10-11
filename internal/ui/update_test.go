@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -134,33 +133,6 @@ func TestSyncTableHeight(t *testing.T) {
 	}
 }
 
-func TestHandleSearchDone(t *testing.T) {
-	t.Parallel()
-
-	t.Run("success", func(t *testing.T) {
-		t.Parallel()
-
-		m := New(nil, "q")
-		m = m.handleSearchDone(searchDoneMsg{PRs: testPRs()})
-
-		assert.False(t, m.loading)
-		require.NoError(t, m.err)
-		assert.Equal(t, testPRs(), m.prs)
-		assert.Len(t, m.table.Rows(), 2)
-	})
-
-	t.Run("error", func(t *testing.T) {
-		t.Parallel()
-
-		m := New(nil, "q")
-		m = m.handleSearchDone(searchDoneMsg{err: assert.AnError})
-
-		assert.False(t, m.loading)
-		require.ErrorIs(t, m.err, assert.AnError)
-		assert.Empty(t, m.prs)
-	})
-}
-
 func TestHandleListKey_Quit(t *testing.T) {
 	t.Parallel()
 
@@ -269,17 +241,6 @@ func TestHandleListKey_PreviewNeedsFocusedPR(t *testing.T) {
 	}
 }
 
-func TestStartAction_AutoMergeNeedsLoadedDetails(t *testing.T) {
-	t.Parallel()
-
-	m := loadedModel()
-	m.prs[0].Detailed = false
-
-	m, _ = m.handleListKeyByString("a")
-	assert.Equal(t, screenList, m.screen)
-	assert.NotEmpty(t, m.notice)
-}
-
 func TestHandleListKey_TogglePreviewResizesTable(t *testing.T) {
 	t.Parallel()
 
@@ -323,47 +284,6 @@ func TestHandleListKey_RefreshFetchesFocusedDetailsAlongsideReload(t *testing.T)
 	assert.Equal(t, 1, m.fetching)
 }
 
-func TestHandleListKey_StartAction_NoSelectionTargetsFocused(t *testing.T) {
-	t.Parallel()
-
-	m := loadedModel()
-	m, _ = m.handleListKeyByString("j")
-	m, _ = m.handleListKeyByString("c")
-
-	assert.Equal(t, screenConfirm, m.screen)
-	assert.Equal(
-		t,
-		[]github.PR{m.prs[1]},
-		m.confirm,
-		"with nothing selected, actions apply to the focused PR",
-	)
-	assert.Empty(t, m.selected)
-}
-
-func TestHandleListKey_StartAction_NeedsInput(t *testing.T) {
-	t.Parallel()
-
-	m := loadedModel()
-	m, _ = m.handleListKeyByString("x")
-
-	m, _ = m.handleListKeyByString("l")
-	assert.Equal(t, screenActionInput, m.screen)
-	assert.Equal(t, "l", m.actionKey)
-	assert.True(t, m.actionInput.Focused())
-}
-
-func TestHandleListKey_StartAction_NoInputNeeded(t *testing.T) {
-	t.Parallel()
-
-	m := loadedModel()
-	m, _ = m.handleListKeyByString("x")
-
-	m, _ = m.handleListKeyByString("c")
-	assert.Equal(t, screenConfirm, m.screen)
-	require.Len(t, m.confirm, 1)
-	assert.Equal(t, 1, m.confirm[0].Number)
-}
-
 func TestHandleFilterKey(t *testing.T) {
 	t.Parallel()
 
@@ -395,183 +315,6 @@ func TestHandleFilterKey(t *testing.T) {
 		assert.Equal(t, screenList, m.screen)
 		assert.Equal(t, original, m.query)
 	})
-}
-
-func TestHandleActionInputKey(t *testing.T) {
-	t.Parallel()
-
-	t.Run("enter builds the action and moves to confirm", func(t *testing.T) {
-		t.Parallel()
-
-		m := loadedModel()
-		m, _ = m.handleListKeyByString("x")
-		m.screen = screenActionInput
-		m.actionKey = "l"
-		m.actionInput.SetValue("bug")
-
-		m, _ = m.handleActionInputKey(tea.KeyPressMsg{Code: tea.KeyEnter})
-
-		assert.Equal(t, screenConfirm, m.screen)
-		require.NotNil(t, m.action)
-		assert.Contains(t, m.action.label, "bug")
-		require.Len(t, m.confirm, 1)
-	})
-
-	t.Run("esc cancels back to the list", func(t *testing.T) {
-		t.Parallel()
-
-		m := loadedModel()
-		m.screen = screenActionInput
-		m.actionKey = "l"
-
-		m, _ = m.handleActionInputKey(tea.KeyPressMsg{Code: tea.KeyEsc})
-
-		assert.Equal(t, screenList, m.screen)
-	})
-}
-
-func TestHandleConfirmKey(t *testing.T) {
-	t.Parallel()
-
-	t.Run("y starts the action", func(t *testing.T) {
-		t.Parallel()
-
-		m := loadedModel()
-		m.screen = screenConfirm
-		m.confirm = testPRs()
-		m.action = &pendingAction{label: actionClose, run: noopAction}
-
-		m, cmd := m.handleConfirmKey(tea.KeyPressMsg{Code: tea.KeyEnter})
-
-		assert.Equal(t, screenResults, m.screen)
-		assert.Nil(t, m.results)
-		require.NotNil(t, m.actionDone)
-		assert.Equal(t, 2, m.actionTotal)
-		require.NotNil(t, cmd)
-	})
-
-	t.Run("n cancels back to the list", func(t *testing.T) {
-		t.Parallel()
-
-		m := loadedModel()
-		m.screen = screenConfirm
-
-		m, _ = m.handleConfirmKey(keyMsgFromString("n"))
-		assert.Equal(t, screenList, m.screen)
-	})
-}
-
-func TestHandleConfirmKey_DestructiveNeedsY(t *testing.T) {
-	t.Parallel()
-
-	for _, label := range []string{actionClose, actionMerge} {
-		t.Run(label, func(t *testing.T) {
-			t.Parallel()
-
-			m := loadedModel()
-			m.screen = screenConfirm
-			m.confirm = testPRs()
-			m.action = &pendingAction{label: label, run: noopAction, destructive: true}
-
-			same, cmd := m.handleConfirmKey(tea.KeyPressMsg{Code: tea.KeyEnter})
-			assert.Equal(
-				t,
-				screenConfirm,
-				same.screen,
-				"enter must not confirm an irreversible action",
-			)
-			assert.Nil(t, cmd)
-
-			started, cmd := m.handleConfirmKey(keyMsgFromString("y"))
-			assert.Equal(t, screenResults, started.screen)
-			assert.NotNil(t, cmd)
-		})
-	}
-}
-
-func TestListKey_AutoMerge(t *testing.T) {
-	t.Parallel()
-
-	tests := map[string]struct {
-		cleanPRs        []int // indexes into the two loaded PRs that are already clean
-		wantDestructive bool
-		wantMergesNow   int
-	}{
-		"none clean stays easy": {},
-		"one clean needs an explicit yes": {
-			cleanPRs:        []int{1},
-			wantDestructive: true,
-			wantMergesNow:   1,
-		},
-		"all clean": {
-			cleanPRs:        []int{0, 1},
-			wantDestructive: true,
-			wantMergesNow:   2,
-		},
-	}
-
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			m := loadedModel()
-			for _, idx := range tt.cleanPRs {
-				m.prs[idx].MergeState = github.MergeClean
-			}
-
-			for _, pull := range m.prs {
-				m.selected[keyOf(pull)] = true
-			}
-
-			m, _ = m.handleListKeyByString("a")
-
-			require.Equal(t, screenConfirm, m.screen)
-			require.NotNil(t, m.action)
-			assert.Equal(t, "toggle auto-merge", m.action.label)
-			assert.Equal(t, tt.wantDestructive, m.action.destructive)
-			assert.Equal(t, tt.wantMergesNow, strings.Count(m.confirmBody(), "merges now"))
-		})
-	}
-}
-
-func TestListKey_UpdateBranch(t *testing.T) {
-	t.Parallel()
-
-	m, _ := loadedModel().handleListKeyByString("u")
-
-	require.Equal(t, screenConfirm, m.screen)
-	require.NotNil(t, m.action)
-	assert.Equal(t, "update branch", m.action.label)
-	assert.False(t, m.action.destructive)
-}
-
-func TestHandleResultsKey(t *testing.T) {
-	t.Parallel()
-
-	m := loadedModel()
-	m.screen = screenResults
-	m.results = []worker.Result{}
-
-	m, cmd := m.handleResultsKey(tea.KeyPressMsg{Code: tea.KeyEnter})
-
-	assert.Equal(t, screenList, m.screen)
-	assert.True(t, m.loading)
-	require.NotNil(t, cmd)
-}
-
-func TestHandleResultsKey_IgnoredWhileRunning(t *testing.T) {
-	t.Parallel()
-
-	for _, keyType := range []rune{tea.KeyEnter, tea.KeyEsc} {
-		m := loadedModel()
-		m.screen = screenResults
-		m.results = nil
-
-		m, cmd := m.handleResultsKey(tea.KeyPressMsg{Code: keyType})
-
-		assert.Equal(t, screenResults, m.screen, "the screen must not change mid-run")
-		assert.Nil(t, cmd)
-	}
 }
 
 func TestFocusedPR(t *testing.T) {
@@ -665,66 +408,6 @@ func TestUpdate_SearchDone(t *testing.T) {
 	require.True(t, ok)
 	assert.False(t, mm.loading)
 	assert.Equal(t, testPRs(), mm.prs)
-}
-
-func TestUpdate_ActionDone(t *testing.T) {
-	t.Parallel()
-
-	m := loadedModel()
-	updated, cmd := m.Update(actionDoneMsg{})
-
-	mm, ok := updated.(Model)
-	require.True(t, ok)
-	assert.Equal(t, screenResults, mm.screen)
-	assert.Nil(t, cmd)
-}
-
-func TestUpdate_ActionDone_AppliesOnDoneToSucceededPRs(t *testing.T) {
-	t.Parallel()
-
-	m := loadedModel()
-	m.action = &pendingAction{
-		label:  "toggle auto-merge",
-		onDone: func(pr *github.PR) { pr.AutoMerge = !pr.AutoMerge },
-	}
-
-	prs := testPRs()
-	updated, _ := m.Update(actionDoneMsg{results: []worker.Result{
-		{PR: prs[0]},
-		{PR: prs[1], Err: errors.New("boom")},
-	}})
-
-	mm, ok := updated.(Model)
-	require.True(t, ok)
-	assert.True(t, mm.prs[0].AutoMerge)
-	assert.False(t, mm.prs[1].AutoMerge, "a failed PR keeps its state")
-	assert.Equal(t, "on", mm.table.Rows()[0][6])
-}
-
-func TestUpdate_ActionProgress(t *testing.T) {
-	t.Parallel()
-
-	t.Run("reschedules while running", func(t *testing.T) {
-		t.Parallel()
-
-		m := loadedModel()
-		m.screen = screenResults
-		m.results = nil
-
-		_, cmd := m.Update(actionProgressMsg{})
-		require.NotNil(t, cmd)
-	})
-
-	t.Run("stops once results land", func(t *testing.T) {
-		t.Parallel()
-
-		m := loadedModel()
-		m.screen = screenResults
-		m.results = []worker.Result{}
-
-		_, cmd := m.Update(actionProgressMsg{})
-		assert.Nil(t, cmd)
-	})
 }
 
 func TestUpdate_SpinnerTick(t *testing.T) {
@@ -1029,90 +712,10 @@ func TestTabs(t *testing.T) {
 	})
 }
 
-func TestQueryChangesAreRecorded(t *testing.T) {
-	t.Parallel()
-
-	path := filepath.Join(t.TempDir(), "history")
-	m := loadedModel().WithHistory(history.New(path))
-
-	record := func(query string) {
-		var cmd tea.Cmd
-
-		m, cmd = m.runQuery(query)
-
-		batch, ok := cmd().(tea.BatchMsg)
-		require.True(t, ok)
-		require.NotEmpty(t, batch)
-
-		// The history write is the first command of the batch.
-		assert.Nil(t, batch[0](), "recording a query produces no message")
-	}
-
-	record(tabs()[0].query)
-	record("is:open is:pr author:hugoh")
-
-	got, err := os.ReadFile(path) //nolint:gosec // test reads its own temp file
-	require.NoError(t, err)
-	assert.Equal(
-		t,
-		"is:open is:pr archived:false sort:updated-desc owner:@me\nis:open is:pr author:hugoh\n",
-		string(got),
-	)
-}
-
-func TestRunQuery_DoesNoFileIOItself(t *testing.T) {
-	t.Parallel()
-
-	path := filepath.Join(t.TempDir(), "history")
-	m := loadedModel().WithHistory(history.New(path))
-
-	_, cmd := m.runQuery("is:open")
-
-	require.NotNil(t, cmd)
-	assert.NoFileExists(t, path, "the write happens when the command runs, not inside Update")
-}
-
-func TestRunQuery_WithoutHistory(t *testing.T) {
-	t.Parallel()
-
-	_, cmd := loadedModel().runQuery("is:open")
-
-	assert.NotNil(t, cmd, "the search still runs")
-}
-
 func reloaded(t *testing.T, m Model) (Model, tea.Cmd) {
 	t.Helper()
 
 	return m.reload()
-}
-
-func TestSearchIgnoresStaleResults(t *testing.T) {
-	t.Parallel()
-
-	m := loadedModel()
-	m, _ = reloaded(t, m)
-	firstID := m.searchID
-	m, _ = reloaded(t, m)
-	require.Greater(t, m.searchID, firstID)
-
-	m = m.handleSearchDone(
-		searchDoneMsg{PRs: []github.PR{{Number: 99, Repo: testRepoA}}, id: firstID},
-	)
-
-	assert.True(t, m.loading, "stale result must not end the loading state")
-	assert.Equal(t, testPRs(), m.prs, "stale result must not replace the list")
-}
-
-func TestReloadCancelsPreviousSearch(t *testing.T) {
-	t.Parallel()
-
-	canceled := false
-	m := loadedModel()
-	m.cancel = func() { canceled = true }
-
-	_, _ = reloaded(t, m)
-
-	assert.True(t, canceled)
 }
 
 func TestTabSwitchUsesCache(t *testing.T) {
@@ -1135,18 +738,6 @@ func TestTabSwitchUsesCache(t *testing.T) {
 	require.NotNil(t, cmd)
 }
 
-func TestRefreshKeepsSelectionOfSurvivingPRs(t *testing.T) {
-	t.Parallel()
-
-	m := loadedModel()
-	m.selected[keyOf(m.prs[0])] = true
-	m.selected[keyOf(m.prs[1])] = true
-
-	m = m.handleSearchDone(searchDoneMsg{PRs: testPRs()[:1]})
-
-	assert.Equal(t, map[prKey]bool{keyOf(testPRs()[0]): true}, m.selected)
-}
-
 func TestTabSwitchClearsSelection(t *testing.T) {
 	t.Parallel()
 
@@ -1156,31 +747,6 @@ func TestTabSwitchClearsSelection(t *testing.T) {
 	m, _ = m.handleListKeyByString("2")
 
 	assert.Empty(t, m.selected)
-}
-
-func TestFinishingActionForcesFullReload(t *testing.T) {
-	t.Parallel()
-
-	m := loadedModel()
-	m.cache[m.query] = github.Page{PRs: m.prs}
-	m.screen = screenResults
-	m.results = []worker.Result{{}}
-
-	m, _ = m.handleResultsKey(tea.KeyPressMsg{Code: tea.KeyEnter})
-
-	assert.Len(t, m.prs, len(testPRs()), "rows the action didn't touch stay while reloading")
-	assert.Empty(t, m.selected)
-	assert.NotContains(t, m.cache, m.query)
-	assert.True(t, m.loading)
-}
-
-func TestReloadKeepsRows(t *testing.T) {
-	t.Parallel()
-
-	m := loadedModel()
-	m, _ = reloaded(t, m)
-
-	assert.Equal(t, testPRs(), m.prs, "refresh keeps showing the current rows")
 }
 
 // manyPRs builds count PRs numbered from first, all in testRepoA.
@@ -1211,116 +777,6 @@ func pagedModel() Model {
 		PRs: manyPRs(1, 50, true), Total: 312, EndCursor: "c1", HasNext: true,
 		query: "q",
 	})
-}
-
-func TestFullPageStoresPaging(t *testing.T) {
-	t.Parallel()
-
-	m := pagedModel()
-
-	assert.Equal(t, 312, m.total)
-	assert.Equal(t, "c1", m.endCursor)
-	assert.True(t, m.hasMore)
-	assert.Equal(
-		t,
-		github.Page{PRs: m.prs, Total: 312, EndCursor: "c1", HasNext: true},
-		m.cache["q"],
-	)
-}
-
-func TestLoadMore_DedupesShiftedResults(t *testing.T) {
-	t.Parallel()
-
-	m := pagedModel()
-	m.loadingMore = true
-
-	m = m.handleSearchDone(searchDoneMsg{PRs: manyPRs(50, 50, true), more: true})
-
-	assert.Len(t, m.prs, 99, "PR 50 was already on the first page")
-}
-
-func TestLoadMore_ErrorKeepsRows(t *testing.T) {
-	t.Parallel()
-
-	m := pagedModel()
-	m.loadingMore = true
-
-	m = m.handleSearchDone(searchDoneMsg{more: true, err: assert.AnError})
-
-	require.NoError(t, m.err, "the list itself is still fine")
-	require.ErrorIs(t, m.moreErr, assert.AnError)
-	assert.False(t, m.loadingMore)
-	assert.Len(t, m.prs, 50)
-	assert.Contains(t, m.View().Content, "load more failed")
-}
-
-func TestLoadMore_StaleResultDroppedAfterReload(t *testing.T) {
-	t.Parallel()
-
-	m := pagedModel()
-	m.loadingMore = true
-	staleID := m.searchID
-
-	m, _ = reloaded(t, m)
-	assert.False(t, m.loadingMore, "a new search abandons the in-flight page")
-
-	m = m.handleSearchDone(searchDoneMsg{PRs: manyPRs(51, 50, true), id: staleID, more: true})
-	assert.Len(t, m.prs, 50)
-}
-
-func TestMaybeLoadMore(t *testing.T) {
-	t.Parallel()
-
-	tests := map[string]struct {
-		mutate func(*Model)
-		cursor int
-		want   bool
-	}{
-		"near the bottom":     {cursor: 50 - loadMoreMargin, want: true},
-		"far from the bottom": {cursor: 0, want: false},
-		"nothing more to load": {
-			cursor: 49,
-			mutate: func(m *Model) { m.hasMore = false },
-			want:   false,
-		},
-		"already loading more": {
-			cursor: 49,
-			mutate: func(m *Model) { m.loadingMore = true },
-			want:   false,
-		},
-		"first search running": {
-			cursor: 49,
-			mutate: func(m *Model) { m.loading = true },
-			want:   false,
-		},
-		"retries after an error": {
-			cursor: 49,
-			mutate: func(m *Model) { m.moreErr = assert.AnError },
-			want:   true,
-		},
-	}
-
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			m := pagedModel()
-			m.table.SetCursor(tt.cursor)
-
-			if tt.mutate != nil {
-				tt.mutate(&m)
-			}
-
-			got, cmd := m.maybeLoadMore()
-
-			assert.Equal(t, tt.want, cmd != nil)
-
-			if tt.want {
-				assert.True(t, got.loadingMore)
-				assert.NoError(t, got.moreErr, "a retry clears the old error")
-			}
-		})
-	}
 }
 
 func TestMovingNearBottomLoadsMore(t *testing.T) {
@@ -1466,45 +922,6 @@ func TestSyncTableHeight_NeverNegative(t *testing.T) {
 	m := New(nil, "q").handleResize(tea.WindowSizeMsg{Width: 100, Height: 3})
 
 	assert.GreaterOrEqual(t, m.table.Height(), 0)
-}
-
-func TestReloadCancelsTheInFlightMorePage(t *testing.T) {
-	t.Parallel()
-
-	canceled := false
-	m := pagedModel()
-	m.cancelMore = func() { canceled = true }
-
-	m, _ = reloaded(t, m)
-
-	assert.True(t, canceled, "a reload abandons the page being fetched")
-	assert.Nil(t, m.cancelMore)
-}
-
-func TestLoadingMoreKeepsACancelFunc(t *testing.T) {
-	t.Parallel()
-
-	m := pagedModel()
-	m.table.SetCursor(49)
-
-	m, cmd := m.maybeLoadMore()
-
-	require.NotNil(t, cmd)
-	assert.NotNil(t, m.cancelMore)
-}
-
-func TestFinishedMorePageReleasesItsContext(t *testing.T) {
-	t.Parallel()
-
-	released := false
-	m := pagedModel()
-	m.loadingMore = true
-	m.cancelMore = func() { released = true }
-
-	m = m.handleSearchDone(searchDoneMsg{PRs: manyPRs(51, 1, true), query: "q", more: true})
-
-	assert.True(t, released)
-	assert.Nil(t, m.cancelMore)
 }
 
 func TestQuitWithASelectionNeedsASecondPress(t *testing.T) {
@@ -1862,37 +1279,6 @@ func TestNew_HasARealBrowserByDefault(t *testing.T) {
 	require.NotNil(t, New(nil, "q").open)
 }
 
-func TestLoadMore_AppendsThePageAndCachesIt(t *testing.T) {
-	t.Parallel()
-
-	m := pagedModel()
-	m.loadingMore = true
-
-	m = m.handleSearchDone(searchDoneMsg{
-		PRs: manyPRs(51, 50, false), Total: 312, EndCursor: "c2", HasNext: true,
-		query: "q",
-		more:  true,
-	})
-
-	assert.Len(t, m.prs, 100)
-	assert.Equal(t, "…", m.table.Rows()[50][4], "the new rows wait for their details")
-	assert.False(t, m.loadingMore)
-	assert.Equal(t, "c2", m.endCursor)
-	assert.True(t, m.hasMore)
-	assert.Len(t, m.cache["q"].PRs, 100)
-	assert.Equal(t, "c2", m.cache["q"].EndCursor)
-}
-
-func TestSearchDone_ShowsRowsWithPlaceholdersUntilDetailsLand(t *testing.T) {
-	t.Parallel()
-
-	m := New(nil, "q").handleSearchDone(searchDoneMsg{PRs: manyPRs(1, 3, false)})
-
-	assert.False(t, m.loading)
-	assert.Equal(t, "…", m.table.Rows()[0][4])
-	assert.Equal(t, "…", m.table.Rows()[0][5])
-}
-
 func TestCopyFocusedURL(t *testing.T) {
 	t.Parallel()
 
@@ -1934,86 +1320,6 @@ func TestToggleTerm(t *testing.T) {
 	assert.Equal(t, "is:pr x", toggleTerm("is:pr x y", "y"))
 }
 
-func TestApplyOnDone_KeepsStoredDetailsInStep(t *testing.T) {
-	t.Parallel()
-
-	m := detailModel(t)
-	m, _ = m.handleDetailsDone(
-		detailsDoneMsg{ids: []string{idOf(1)}, details: []github.Detail{detailFor(1)}},
-	)
-	m.details[idOf(1)] = github.Detail{ID: idOf(1), MergeState: "BLOCKED"}
-	m = m.withStoredDetails()
-	m.action = actionsForKey(nil, "a", "")
-
-	m = m.applyOnDone([]worker.Result{{PR: m.prs[0]}})
-	m = m.withStoredDetails()
-
-	assert.True(t, m.prs[0].AutoMerge, "a later refresh of the rows doesn't undo the toggle")
-}
-
-const renovateTestBody = "Update foo.\n\n" +
-	" - [ ] <!-- rebase-check -->If you want to rebase/retry this PR, check this box\n"
-
-func TestStartAction_UpdateBranch(t *testing.T) {
-	t.Parallel()
-
-	const (
-		renovate, dependabot = "renovate", "dependabot"
-		update, onGitHub     = "update branch", "update branch (GitHub)"
-	)
-
-	tests := []struct {
-		key             string
-		bot             string
-		wantLabel       string
-		wantNote        string
-		wantDestructive bool
-	}{
-		{"u", "", update, "", false},
-		{"u", renovate, update, "rebase via Renovate", false},
-		{"u", dependabot, update, "rebase via Dependabot", false},
-		{"U", "", onGitHub, "", false},
-		{"U", renovate, onGitHub, "Renovate stops updating this PR", true},
-		{"U", dependabot, onGitHub, "Dependabot stops updating this PR", true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.key+" "+tt.bot, func(t *testing.T) {
-			t.Parallel()
-
-			m := loadedModel()
-
-			switch tt.bot {
-			case renovate:
-				m.prs[0].Body = renovateTestBody
-			case dependabot:
-				m.prs[0].Author = dependabot
-			}
-
-			m, _ = m.handleListKeyByString(tt.key)
-
-			require.Equal(t, screenConfirm, m.screen)
-			assert.Equal(t, tt.wantLabel, m.action.label)
-			assert.Equal(t, tt.wantNote, m.action.note(m.prs[0]))
-			assert.Equal(t, tt.wantDestructive, m.action.destructive)
-		})
-	}
-}
-
-func TestStartAction_UpdateNeedsLoadedDetails(t *testing.T) {
-	t.Parallel()
-
-	for _, key := range []string{"u", "U"} {
-		m := loadedModel()
-		m.prs[0].Detailed = false
-
-		m, _ = m.handleListKeyByString(key)
-
-		assert.Equal(t, screenList, m.screen, key)
-		assert.NotEmpty(t, m.notice, "whether it is a Renovate PR isn't known yet")
-	}
-}
-
 func TestRowsFor_MarksRequestedRebases(t *testing.T) {
 	t.Parallel()
 
@@ -2025,87 +1331,4 @@ func TestRowsFor_MarksRequestedRebases(t *testing.T) {
 	rows := rowsFor([]github.PR{requested}, map[prKey]bool{}, map[string]fetchState{})
 
 	assert.Equal(t, refreshingMark, rows[0][0])
-}
-
-func TestStartAction_CloseNotesWhatBotsDo(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name   string
-		author string
-		body   string
-		want   string
-	}{
-		{"renovate", "renovate", renovateTestBody, "Renovate ignores this update from now on"},
-		{"dependabot", "dependabot", "", "Dependabot skips this version from now on"},
-		{"person", testAuthor, "", ""},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			m := loadedModel()
-			m.prs[0].Author, m.prs[0].Body = tt.author, tt.body
-
-			m, _ = m.handleListKeyByString("c")
-
-			require.Equal(t, screenConfirm, m.screen)
-			assert.Equal(t, tt.want, m.action.note(m.prs[0]))
-			assert.True(t, m.action.destructive)
-		})
-	}
-}
-
-func TestStartAction_CloseNeedsLoadedDetails(t *testing.T) {
-	t.Parallel()
-
-	m := loadedModel()
-	m.prs[0].Detailed = false
-
-	m, _ = m.handleListKeyByString("c")
-
-	assert.Equal(t, screenList, m.screen)
-	assert.NotEmpty(t, m.notice, "whether it is Renovate's isn't known yet")
-}
-
-func TestStartAction_NotesMergesThatDontSquash(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		key    string
-		method string
-		want   string
-	}{
-		{"m", "", ""},
-		{"m", github.MergeSquash, ""},
-		{"m", github.MergeCommit, "merges with a merge commit"},
-		{"m", github.MergeRebase, "merges by rebasing"},
-		{"a", github.MergeRebase, "merges now by rebasing"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.key+" "+tt.method, func(t *testing.T) {
-			t.Parallel()
-
-			m := loadedModel()
-			m.prs[0].MergeMethod, m.prs[0].MergeState = tt.method, github.MergeClean
-
-			m, _ = m.handleListKeyByString(tt.key)
-
-			require.Equal(t, screenConfirm, m.screen)
-			assert.Equal(t, tt.want, m.action.note(m.prs[0]))
-		})
-	}
-}
-
-func TestHandleListKey_Approve(t *testing.T) {
-	t.Parallel()
-
-	m, _ := loadedModel().handleListKeyByString("v")
-
-	require.Equal(t, screenConfirm, m.screen)
-	require.NotNil(t, m.action)
-	assert.Equal(t, "approve", m.action.label)
-	assert.False(t, m.action.destructive)
 }

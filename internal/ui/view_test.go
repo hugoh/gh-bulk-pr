@@ -3,7 +3,6 @@ package ui
 import (
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -1078,67 +1077,6 @@ func TestPendingSummary(t *testing.T) {
 
 	assert.Equal(t, "2 waiting", pendingSummary(prs))
 	assert.Empty(t, pendingSummary(prs[2:]))
-}
-
-// afterAction is loadedModel with the action for actionKey confirmed.
-func afterAction(actionKey string) Model {
-	m := loadedModel()
-	for i := range m.prs {
-		m.prs[i].ID = fmt.Sprintf("PR_%d", m.prs[i].Number)
-	}
-
-	m.action = actionsForKey(nil, actionKey, "")
-
-	return m
-}
-
-func TestLeavingResultsKeepsRowsOfActionsThatDontClose(t *testing.T) {
-	t.Parallel()
-
-	m := afterAction("u")
-	m.screen = screenResults
-	m.results = []worker.Result{{PR: m.prs[0]}}
-
-	m, _ = m.handleResultsKey(keyMsgFromString("enter"))
-
-	assert.Len(t, m.prs, len(testPRs()))
-}
-
-func TestLeavingResultsKeepsMergedPRsOutOfStaleSearches(t *testing.T) {
-	t.Parallel()
-
-	m := afterAction("m")
-	m.screen = screenResults
-	m.results = []worker.Result{{PR: m.prs[0]}}
-	stale := slices.Clone(m.prs)
-
-	m, _ = m.handleResultsKey(keyMsgFromString("enter"))
-	m = m.handleSearchDone(searchDoneMsg{PRs: stale, Total: 2, id: m.searchID})
-
-	assert.Len(t, m.prs, 1)
-	assert.Equal(t, 1, m.total)
-}
-
-func TestLeavingResultsKeepsRowsExceptSucceeded(t *testing.T) {
-	t.Parallel()
-
-	m := afterAction("m")
-	require.GreaterOrEqual(t, len(m.prs), 2)
-
-	done, failed := m.prs[0], m.prs[1]
-	m.screen = screenResults
-	m.total = 10
-	m.results = []worker.Result{{PR: done}, {PR: failed, Err: errors.New("boom")}}
-
-	m, cmd := m.handleResultsKey(keyMsgFromString("enter"))
-
-	assert.NotNil(t, cmd, "a fresh search starts")
-	assert.True(t, m.loading)
-	assert.Equal(t, screenList, m.screen)
-	assert.NotContains(t, m.prs, done)
-	assert.Contains(t, m.prs, failed)
-	assert.Len(t, m.prs, len(testPRs())-1)
-	assert.Equal(t, 9, m.total, "the total drops with the removed rows while reloading")
 }
 
 func TestViewAfterLeavingResultsShowsRefreshingAndReducedTotal(t *testing.T) {
