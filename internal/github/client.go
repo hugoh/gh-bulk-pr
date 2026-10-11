@@ -454,6 +454,13 @@ func (c *Client) MergePR(ctx context.Context, pr PR) error {
 
 func (p PR) mergeMethod() string { return cmp.Or(p.MergeMethod, MergeSquash) }
 
+// ApprovePR submits an approving review.
+func (c *Client) ApprovePR(ctx context.Context, pr PR) error {
+	return c.do(ctx, "approve pr", http.MethodPost,
+		fmt.Sprintf("repos/%s/pulls/%d/reviews", pr.Repo, pr.Number),
+		map[string]string{"event": "APPROVE"})
+}
+
 // UpdateBranch merges the base branch into a PR that is behind it.
 func (c *Client) UpdateBranch(ctx context.Context, pr PR) error {
 	return c.do(ctx, "update branch", http.MethodPut,

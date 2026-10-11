@@ -93,6 +93,14 @@ func TestClientActions(t *testing.T) {
 			wantPath:       "/repos/hugoh/gh-bulk-pr/pulls/7/merge",
 			wantBodySubstr: `"merge_method":"rebase"`,
 		},
+		"approve pr": {
+			call: func(ctx context.Context, c *Client) error {
+				return c.ApprovePR(ctx, PR{Repo: testRepo, Number: 7})
+			},
+			wantMethod:     http.MethodPost,
+			wantPath:       "/repos/hugoh/gh-bulk-pr/pulls/7/reviews",
+			wantBodySubstr: `"event":"APPROVE"`,
+		},
 		"update branch": {
 			call: func(ctx context.Context, c *Client) error {
 				return c.UpdateBranch(ctx, PR{Repo: testRepo, Number: 7})

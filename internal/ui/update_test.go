@@ -2098,3 +2098,14 @@ func TestStartAction_NotesMergesThatDontSquash(t *testing.T) {
 		})
 	}
 }
+
+func TestHandleListKey_Approve(t *testing.T) {
+	t.Parallel()
+
+	m, _ := loadedModel().handleListKeyByString("v")
+
+	require.Equal(t, screenConfirm, m.screen)
+	require.NotNil(t, m.action)
+	assert.Equal(t, "approve", m.action.label)
+	assert.False(t, m.action.destructive)
+}

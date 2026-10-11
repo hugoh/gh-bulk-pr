@@ -124,6 +124,8 @@ func actionsForKey(client *github.Client, actionKey, input string) *pendingActio
 				return ""
 			},
 		}
+	case "v":
+		return &pendingAction{label: "approve", run: client.ApprovePR}
 	case "u", "U":
 		return updateAction(client, actionKey == "U")
 	case "a":
