@@ -3,6 +3,7 @@ package ui
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -1079,10 +1080,49 @@ func TestPendingSummary(t *testing.T) {
 	assert.Empty(t, pendingSummary(prs[2:]))
 }
 
+// afterAction is loadedModel with the action for actionKey confirmed.
+func afterAction(actionKey string) Model {
+	m := loadedModel()
+	for i := range m.prs {
+		m.prs[i].ID = fmt.Sprintf("PR_%d", m.prs[i].Number)
+	}
+
+	m.action = actionsForKey(nil, actionKey, "")
+
+	return m
+}
+
+func TestLeavingResultsKeepsRowsOfActionsThatDontClose(t *testing.T) {
+	t.Parallel()
+
+	m := afterAction("u")
+	m.screen = screenResults
+	m.results = []worker.Result{{PR: m.prs[0]}}
+
+	m, _ = m.handleResultsKey(keyMsgFromString("enter"))
+
+	assert.Len(t, m.prs, len(testPRs()))
+}
+
+func TestLeavingResultsKeepsMergedPRsOutOfStaleSearches(t *testing.T) {
+	t.Parallel()
+
+	m := afterAction("m")
+	m.screen = screenResults
+	m.results = []worker.Result{{PR: m.prs[0]}}
+	stale := slices.Clone(m.prs)
+
+	m, _ = m.handleResultsKey(keyMsgFromString("enter"))
+	m = m.handleSearchDone(searchDoneMsg{PRs: stale, Total: 2, id: m.searchID})
+
+	assert.Len(t, m.prs, 1)
+	assert.Equal(t, 1, m.total)
+}
+
 func TestLeavingResultsKeepsRowsExceptSucceeded(t *testing.T) {
 	t.Parallel()
 
-	m := loadedModel()
+	m := afterAction("m")
 	require.GreaterOrEqual(t, len(m.prs), 2)
 
 	done, failed := m.prs[0], m.prs[1]
@@ -1104,7 +1144,7 @@ func TestLeavingResultsKeepsRowsExceptSucceeded(t *testing.T) {
 func TestViewAfterLeavingResultsShowsRefreshingAndReducedTotal(t *testing.T) {
 	t.Parallel()
 
-	m := loadedModel()
+	m := afterAction("m")
 	m.total = 10
 	m.screen = screenResults
 	succeeded, failed := m.prs[0], m.prs[1]

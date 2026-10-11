@@ -50,6 +50,7 @@ func (p PR) Waiting() bool {
 // it is slow: merge state, check rollup, labels, reviewers and body.
 type Detail struct {
 	ID         string
+	Closed     bool // merged or closed; GitHub reports such a PR's merge state as UNKNOWN for good
 	Body       string
 	MergeState string
 	Checks     string
@@ -139,6 +140,7 @@ query($ids: [ID!]!) {
   nodes(ids: $ids) {
     ... on PullRequest {
       id
+      state
       body
       mergeStateStatus
       labels(first: 20) { nodes { name } }
@@ -189,6 +191,7 @@ type detailsResponse struct {
 // detailNode's ID is empty when the ID no longer resolves to a PR.
 type detailNode struct {
 	ID               string
+	State            string
 	Body             string
 	MergeStateStatus string
 	Labels           struct {
@@ -215,6 +218,8 @@ type detailNode struct {
 		}
 	}
 }
+
+func (n detailNode) closed() bool { return n.State == "MERGED" || n.State == "CLOSED" }
 
 // checkContext is a commit status (Context, State) or a check run (Name,
 // Status); the fields of the other kind stay empty.
@@ -311,7 +316,12 @@ func (c *Client) Details(ctx context.Context, ids []string) ([]Detail, error) {
 }
 
 func detailFromNode(node detailNode) Detail {
-	result := Detail{ID: node.ID, Body: node.Body, MergeState: node.MergeStateStatus}
+	result := Detail{
+		ID:         node.ID,
+		Closed:     node.closed(),
+		Body:       node.Body,
+		MergeState: node.MergeStateStatus,
+	}
 	for _, label := range node.Labels.Nodes {
 		result.Labels = append(result.Labels, label.Name)
 	}

@@ -172,13 +172,24 @@ func (m Model) adjustInterval(details []github.Detail) Model {
 
 // withStoredDetails fills in every listed PR whose details are known, however
 // old, so a refresh doesn't blank the Checks and Merge columns while it loads.
-// m.prs may be shared with the cache, so it is copied, not edited.
+// PRs known to be closed are dropped: the search index lists them for a while
+// after they merge. m.prs may be shared with the cache, so it is copied, not
+// edited.
 func (m Model) withStoredDetails() Model {
-	prs := slices.Clone(m.prs)
+	prs := make([]github.PR, 0, len(m.prs))
 
-	for i, pr := range prs {
-		if detail, ok := m.details[pr.ID]; ok {
-			prs[i] = pr.WithDetail(detail)
+	for _, pull := range m.prs {
+		detail, known := m.details[pull.ID]
+		switch {
+		// shortcut: a PR reopened during the session stays hidden until restart; re-fetch hidden IDs if that matters.
+		case known && detail.Closed:
+			delete(m.selected, keyOf(pull))
+			m.hidden++
+			m.total = max(m.total-1, 0)
+		case known:
+			prs = append(prs, pull.WithDetail(detail))
+		default:
+			prs = append(prs, pull)
 		}
 	}
 

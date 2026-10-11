@@ -221,7 +221,7 @@ func (m Model) handleSearchDone(msg searchDoneMsg) Model {
 	m.err = msg.err
 
 	if msg.err == nil {
-		m.prs = msg.PRs
+		m.prs, m.hidden = msg.PRs, 0
 		m = m.withStoredDetails()
 		m.selected = survivingSelection(m.selected, m.prs)
 		m = m.storePaging(msg)
@@ -258,7 +258,7 @@ func (m Model) handleMoreDone(msg searchDoneMsg) Model {
 // storePaging records where the next page starts and caches everything
 // loaded so far for the current query.
 func (m Model) storePaging(msg searchDoneMsg) Model {
-	m.total, m.endCursor, m.hasMore = msg.Total, msg.EndCursor, msg.HasNext
+	m.total, m.endCursor, m.hasMore = max(msg.Total-m.hidden, 0), msg.EndCursor, msg.HasNext
 	m.cache[msg.query] = github.Page{
 		PRs:       m.prs,
 		Total:     m.total,
@@ -329,10 +329,8 @@ func (m Model) handleResultsKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 
 	if msg.String() == keyEnter || msg.String() == keyEsc {
 		m.screen = screenList
-		kept := withoutSucceeded(m.prs, m.results)
-		m.total = max(m.total-(len(m.prs)-len(kept)), 0)
-		m.prs = kept
 		m.selected = map[prKey]bool{}
+		m = m.markClosed(m.results).withStoredDetails()
 		delete(m.cache, m.query)
 		m = m.refreshRows()
 
@@ -342,18 +340,28 @@ func (m Model) handleResultsKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	return m.scrollPane(msg, m.resultsBody()), nil
 }
 
-// withoutSucceeded drops the PRs an action just handled, so the list stays
-// populated while the reload runs without showing them in their old state.
-func withoutSucceeded(prs []github.PR, results []worker.Result) []github.PR {
-	done := map[prKey]bool{}
-
-	for _, r := range results {
-		if r.Err == nil {
-			done[keyOf(r.PR)] = true
-		}
+// markClosed records the PRs the action merged or closed, so they leave the
+// list now and stay out of searches that still list them.
+func (m Model) markClosed(results []worker.Result) Model {
+	if m.action == nil || m.action.closes == nil {
+		return m
 	}
 
-	return slices.DeleteFunc(slices.Clone(prs), func(pr github.PR) bool { return done[keyOf(pr)] })
+	for _, res := range results {
+		if res.Err != nil || res.PR.ID == "" || !m.action.closes(res.PR) {
+			continue
+		}
+
+		detail, ok := m.details[res.PR.ID]
+		if !ok {
+			detail = github.Detail{ID: res.PR.ID}
+		}
+
+		detail.Closed = true
+		m.details[res.PR.ID] = detail
+	}
+
+	return m
 }
 
 // reload starts a fresh search for the current query, cancelling any still

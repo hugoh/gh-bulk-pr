@@ -102,15 +102,26 @@ func actionsForKey(client *github.Client, actionKey, input string) *pendingActio
 			run:   func(ctx context.Context, pr github.PR) error { return client.AddLabel(ctx, pr, input) },
 		}
 	case "c":
-		return &pendingAction{label: "close", destructive: true, run: client.ClosePR}
+		return &pendingAction{
+			label:       "close",
+			destructive: true,
+			run:         client.ClosePR,
+			closes:      always,
+		}
 	case "m":
-		return &pendingAction{label: "merge", destructive: true, run: client.MergePR}
+		return &pendingAction{
+			label:       "merge",
+			destructive: true,
+			run:         client.MergePR,
+			closes:      always,
+		}
 	case "u":
 		return &pendingAction{label: "update branch", run: client.UpdateBranch}
 	case "a":
 		return &pendingAction{
-			label: "toggle auto-merge",
-			run:   client.ToggleAutoMerge,
+			label:  "toggle auto-merge",
+			run:    client.ToggleAutoMerge,
+			closes: github.PR.MergesNow,
 			onDone: func(pr *github.PR) {
 				if !pr.MergesNow() {
 					pr.AutoMerge = !pr.AutoMerge
@@ -128,6 +139,8 @@ func actionsForKey(client *github.Client, actionKey, input string) *pendingActio
 
 	return nil
 }
+
+func always(github.PR) bool { return true }
 
 // recordQuery appends query to the history file. It's a command so the file
 // write stays out of Update; a failure is dropped, since history must never

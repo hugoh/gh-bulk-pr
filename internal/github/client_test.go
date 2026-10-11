@@ -250,6 +250,7 @@ const detailsResponseJSON = `{
     "nodes": [
       {
         "id": "PR_node1",
+        "state": "OPEN",
         "body": "body",
         "mergeStateStatus": "BEHIND",
         "labels": {"nodes": [{"name": "bug"}]},
@@ -262,6 +263,7 @@ const detailsResponseJSON = `{
       null,
       {
         "id": "PR_node3",
+        "state": "MERGED",
         "mergeStateStatus": "DIRTY",
         "commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": "ERROR"}}}]}
       }
@@ -295,6 +297,7 @@ func TestDetails(t *testing.T) {
 	}, details[0])
 	assert.Equal(t, ChecksFail, details[1].Checks)
 	assert.Equal(t, "DIRTY", details[1].MergeState)
+	assert.True(t, details[1].Closed, "a merged PR is closed")
 }
 
 func TestDetails_NoIDsSendsNothing(t *testing.T) {

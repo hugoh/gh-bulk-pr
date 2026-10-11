@@ -40,6 +40,7 @@ type pendingAction struct {
 	destructive bool   // hard to undo: only an explicit "y" confirms it, never enter
 	run         func(ctx context.Context, pr github.PR) error
 	onDone      func(pr *github.PR)       // optional: brings a succeeded PR's local copy up to date
+	closes      func(pr github.PR) bool   // optional: whether succeeding on pr merges or closes it
 	note        func(pr github.PR) string // optional: what this action does to pr, when it isn't obvious
 }
 
@@ -62,7 +63,8 @@ type Model struct {
 	actionInput textinput.Model
 	prs         []github.PR
 	cache       map[string]github.Page // last full result per query
-	total       int                    // every match GitHub reports, loaded or not
+	total       int                    // every match GitHub reports, loaded or not, less the hidden ones
+	hidden      int                    // PRs the current search returned that are known closed, so left out
 	endCursor   string                 // where the next page starts
 	hasMore     bool
 	selected    map[prKey]bool

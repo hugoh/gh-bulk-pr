@@ -304,3 +304,51 @@ func TestAppendNew(t *testing.T) {
 	assert.Equal(t, 5, got[4].Number)
 	assert.Len(t, have, 3, "the input may be shared with the cache")
 }
+
+func TestHandleDetailsDone_DropsClosedPRs(t *testing.T) {
+	t.Parallel()
+
+	m := detailModel(t)
+	m.total = 50
+	m.selected[keyOf(m.prs[0])] = true
+	closed := detailFor(1)
+	closed.Closed = true
+
+	m, _ = m.fetchIDs([]string{idOf(1), idOf(2)})
+	m, _ = m.handleDetailsDone(detailsDoneMsg{
+		searchID: m.searchID,
+		ids:      []string{idOf(1), idOf(2)},
+		details:  []github.Detail{closed, detailFor(2)},
+	})
+
+	require.Len(t, m.prs, 49)
+	assert.Equal(t, idOf(2), m.prs[0].ID)
+	assert.Equal(t, 49, m.total)
+	assert.Empty(t, m.selected, "a closed PR can't stay selected")
+}
+
+func TestHandleSearchDone_KeepsKnownClosedPRsOut(t *testing.T) {
+	t.Parallel()
+
+	m := detailModel(t)
+	m.details[idOf(1)] = github.Detail{ID: idOf(1), Closed: true}
+
+	m = m.handleSearchDone(searchDoneMsg{
+		PRs: manyPRs(1, 50, false), Total: 60, HasNext: true,
+		id:    m.searchID,
+		query: "q",
+	})
+
+	require.Len(t, m.prs, 49, "the search index still lists it")
+	assert.Equal(t, 59, m.total)
+
+	m = m.handleSearchDone(searchDoneMsg{
+		PRs: manyPRs(51, 10, false), Total: 60,
+		id:    m.searchID,
+		query: "q",
+		more:  true,
+	})
+
+	assert.Len(t, m.prs, 59)
+	assert.Equal(t, 59, m.total, "the hidden PR stays out of the total on later pages")
+}
