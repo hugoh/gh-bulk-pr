@@ -85,6 +85,14 @@ func TestClientActions(t *testing.T) {
 			wantPath:       "/repos/hugoh/gh-bulk-pr/pulls/7/merge",
 			wantBodySubstr: `"squash"`,
 		},
+		"merge pr with the repo's method": {
+			call: func(ctx context.Context, c *Client) error {
+				return c.MergePR(ctx, PR{Repo: testRepo, Number: 7, MergeMethod: MergeRebase})
+			},
+			wantMethod:     http.MethodPut,
+			wantPath:       "/repos/hugoh/gh-bulk-pr/pulls/7/merge",
+			wantBodySubstr: `"merge_method":"rebase"`,
+		},
 		"update branch": {
 			call: func(ctx context.Context, c *Client) error {
 				return c.UpdateBranch(ctx, PR{Repo: testRepo, Number: 7})
@@ -163,7 +171,10 @@ const searchResponseJSON = `{
           "title": "Fix bug",
           "autoMergeRequest": {"enabledAt": "2026-09-20T00:00:00Z"},
           "url": "https://github.com/hugoh/r/pull/1",
-          "repository": {"nameWithOwner": "hugoh/r"},
+          "repository": {
+            "nameWithOwner": "hugoh/r",
+            "squashMergeAllowed": false, "mergeCommitAllowed": false, "rebaseMergeAllowed": true
+          },
           "author": {"login": "hugoh"}
         }
       ]
@@ -205,6 +216,7 @@ func TestSearchPage(t *testing.T) {
 	assert.Equal(t, "hugoh", pr.Author)
 	assert.Equal(t, "PR_node1", pr.ID)
 	assert.True(t, pr.AutoMerge, "auto-merge is cheap, so the search carries it")
+	assert.Equal(t, MergeRebase, pr.MergeMethod, "the only method the repo allows")
 	assert.False(t, pr.Detailed)
 }
 
@@ -363,7 +375,12 @@ func TestToggleAutoMerge(t *testing.T) {
 		"enables when off": {
 			pr:        PR{ID: testNodeID},
 			wantQuery: "enablePullRequestAutoMerge",
-			wantVars:  "mergeMethod: SQUASH",
+			wantVars:  `"method":"SQUASH"`,
+		},
+		"enables with the repo's method": {
+			pr:        PR{ID: testNodeID, MergeMethod: MergeCommit},
+			wantQuery: "enablePullRequestAutoMerge",
+			wantVars:  `"method":"MERGE"`,
 		},
 		"disables when on": {
 			pr:        PR{ID: testNodeID, AutoMerge: true},

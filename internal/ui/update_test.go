@@ -2068,3 +2068,33 @@ func TestStartAction_CloseNeedsLoadedDetails(t *testing.T) {
 	assert.Equal(t, screenList, m.screen)
 	assert.NotEmpty(t, m.notice, "whether it is Renovate's isn't known yet")
 }
+
+func TestStartAction_NotesMergesThatDontSquash(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		key    string
+		method string
+		want   string
+	}{
+		{"m", "", ""},
+		{"m", github.MergeSquash, ""},
+		{"m", github.MergeCommit, "merges with a merge commit"},
+		{"m", github.MergeRebase, "merges by rebasing"},
+		{"a", github.MergeRebase, "merges now by rebasing"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.key+" "+tt.method, func(t *testing.T) {
+			t.Parallel()
+
+			m := loadedModel()
+			m.prs[0].MergeMethod, m.prs[0].MergeState = tt.method, github.MergeClean
+
+			m, _ = m.handleListKeyByString(tt.key)
+
+			require.Equal(t, screenConfirm, m.screen)
+			assert.Equal(t, tt.want, m.action.note(m.prs[0]))
+		})
+	}
+}

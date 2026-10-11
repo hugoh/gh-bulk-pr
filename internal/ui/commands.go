@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -115,6 +116,13 @@ func actionsForKey(client *github.Client, actionKey, input string) *pendingActio
 			destructive: true,
 			run:         client.MergePR,
 			closes:      always,
+			note: func(pr github.PR) string {
+				if how := mergeHow(pr); how != "" {
+					return "merges " + how
+				}
+
+				return ""
+			},
 		}
 	case "u", "U":
 		return updateAction(client, actionKey == "U")
@@ -131,7 +139,7 @@ func actionsForKey(client *github.Client, actionKey, input string) *pendingActio
 			},
 			note: func(pr github.PR) string {
 				if pr.MergesNow() {
-					return "merges now"
+					return strings.TrimSpace("merges now " + mergeHow(pr))
 				}
 
 				return ""
@@ -168,6 +176,18 @@ func updateAction(client *github.Client, onGitHub bool) *pendingAction {
 		},
 		note: botNote("rebase via %s"),
 	}
+}
+
+// mergeHow is how pr merges when its repo doesn't allow squashing, or "".
+func mergeHow(pr github.PR) string {
+	switch pr.MergeMethod {
+	case github.MergeCommit:
+		return "with a merge commit"
+	case github.MergeRebase:
+		return "by rebasing"
+	}
+
+	return ""
 }
 
 // closeNote says what closing a bot's PR unmerged tells the bot.

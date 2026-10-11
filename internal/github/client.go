@@ -4,6 +4,7 @@ package github
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -17,22 +18,23 @@ import (
 
 // PR is the subset of pull request data the list and preview views need.
 type PR struct {
-	ID         string // GraphQL node ID, which the auto-merge mutations need
-	Number     int
-	UpdatedAt  time.Time
-	Title      string
-	Repo       string // "owner/name"
-	Author     string
-	Labels     []string
-	Reviewers  []string
-	Checks     string   // ChecksPass, ChecksFail, ChecksPending, or "" when there are none
-	Pending    []string // names of the checks still running or waiting, e.g. "renovate/stability-days"
-	AutoMerge  bool     // auto-merge is enabled: it merges once its requirements pass
-	Closed     bool     // merged or closed
-	MergeState string   // raw GraphQL mergeStateStatus, e.g. "CLEAN", "BEHIND"
-	Body       string
-	URL        string
-	Detailed   bool // false until Details has filled in checks, merge state, labels, reviewers and body
+	ID          string // GraphQL node ID, which the auto-merge mutations need
+	Number      int
+	UpdatedAt   time.Time
+	Title       string
+	Repo        string // "owner/name"
+	Author      string
+	Labels      []string
+	Reviewers   []string
+	Checks      string   // ChecksPass, ChecksFail, ChecksPending, or "" when there are none
+	Pending     []string // names of the checks still running or waiting, e.g. "renovate/stability-days"
+	AutoMerge   bool     // auto-merge is enabled: it merges once its requirements pass
+	MergeMethod string   // MergeSquash, MergeCommit or MergeRebase: how its repo lets it merge; "" means squash
+	Closed      bool     // merged or closed
+	MergeState  string   // raw GraphQL mergeStateStatus, e.g. "CLEAN", "BEHIND"
+	Body        string
+	URL         string
+	Detailed    bool // false until Details has filled in checks, merge state, labels, reviewers and body
 }
 
 // MergesNow reports whether toggling auto-merge on this PR merges it
@@ -165,7 +167,7 @@ query($q: String!, $count: Int!, $after: String) {
         updatedAt
         title
         url
-        repository { nameWithOwner }
+        repository { nameWithOwner squashMergeAllowed mergeCommitAllowed rebaseMergeAllowed }
         author { login }
         autoMergeRequest { enabledAt }
       }
@@ -222,8 +224,33 @@ type searchNode struct {
 	UpdatedAt        time.Time
 	Title            string
 	URL              string
-	Repository       struct{ NameWithOwner string }
-	Author           struct{ Login string }
+	Repository       struct {
+		NameWithOwner      string
+		SquashMergeAllowed bool
+		MergeCommitAllowed bool
+		RebaseMergeAllowed bool
+	}
+	Author struct{ Login string }
+}
+
+// Merge methods, as the REST merge endpoint names them.
+const (
+	MergeSquash = "squash"
+	MergeCommit = "merge"
+	MergeRebase = "rebase"
+)
+
+// mergeMethod is the method a PR in node's repo merges with: squash when the
+// repo allows it, else the first it does allow.
+func (node searchNode) mergeMethod() string {
+	switch repo := node.Repository; {
+	case !repo.SquashMergeAllowed && repo.MergeCommitAllowed:
+		return MergeCommit
+	case !repo.SquashMergeAllowed && repo.RebaseMergeAllowed:
+		return MergeRebase
+	}
+
+	return MergeSquash
 }
 
 type detailsResponse struct {
@@ -320,14 +347,15 @@ func (c *Client) SearchPage(ctx context.Context, query, after string) (Page, err
 
 func prFromNode(node searchNode) PR {
 	return PR{
-		ID:        node.ID,
-		AutoMerge: node.AutoMergeRequest != nil,
-		Number:    node.Number,
-		UpdatedAt: node.UpdatedAt,
-		Title:     node.Title,
-		Repo:      node.Repository.NameWithOwner,
-		Author:    node.Author.Login,
-		URL:       node.URL,
+		ID:          node.ID,
+		AutoMerge:   node.AutoMergeRequest != nil,
+		MergeMethod: node.mergeMethod(),
+		Number:      node.Number,
+		UpdatedAt:   node.UpdatedAt,
+		Title:       node.Title,
+		Repo:        node.Repository.NameWithOwner,
+		Author:      node.Author.Login,
+		URL:         node.URL,
 	}
 }
 
@@ -417,12 +445,14 @@ func (c *Client) ClosePR(ctx context.Context, pr PR) error {
 		map[string]string{"state": "closed"})
 }
 
-// MergePR merges a PR using the squash strategy.
+// MergePR merges a PR with the method its repo allows, squash if it can.
 func (c *Client) MergePR(ctx context.Context, pr PR) error {
 	return c.do(ctx, "merge pr", http.MethodPut,
 		fmt.Sprintf("repos/%s/pulls/%d/merge", pr.Repo, pr.Number),
-		map[string]string{"merge_method": "squash"})
+		map[string]string{"merge_method": pr.mergeMethod()})
 }
+
+func (p PR) mergeMethod() string { return cmp.Or(p.MergeMethod, MergeSquash) }
 
 // UpdateBranch merges the base branch into a PR that is behind it.
 func (c *Client) UpdateBranch(ctx context.Context, pr PR) error {
@@ -463,8 +493,8 @@ var errNotRenovate = errors.New("request rebase: no Renovate rebase checkbox in 
 
 const (
 	enableAutoMergeMutation = `
-mutation($id: ID!) {
-  enablePullRequestAutoMerge(input: {pullRequestId: $id, mergeMethod: SQUASH}) { clientMutationId }
+mutation($id: ID!, $method: PullRequestMergeMethod!) {
+  enablePullRequestAutoMerge(input: {pullRequestId: $id, mergeMethod: $method}) { clientMutationId }
 }`
 	disableAutoMergeMutation = `
 mutation($id: ID!) {
@@ -472,20 +502,23 @@ mutation($id: ID!) {
 }`
 )
 
-// ToggleAutoMerge turns auto-merge (squash) off for a PR that has it on, and
-// on for one that doesn't. A PR that is already clean has nothing to wait
-// for, so it is squash-merged instead (see PR.MergesNow).
+// ToggleAutoMerge turns auto-merge off for a PR that has it on, and on, with
+// its repo's merge method, for one that doesn't. A PR that is already clean
+// has nothing to wait for, so it is merged instead (see PR.MergesNow).
 func (c *Client) ToggleAutoMerge(ctx context.Context, pull PR) error {
 	if pull.MergesNow() {
 		return c.MergePR(ctx, pull)
 	}
 
-	mutation := enableAutoMergeMutation
+	mutation, vars := enableAutoMergeMutation, map[string]any{
+		"id":     pull.ID,
+		"method": strings.ToUpper(pull.mergeMethod()),
+	}
 	if pull.AutoMerge {
-		mutation = disableAutoMergeMutation
+		mutation, vars = disableAutoMergeMutation, map[string]any{"id": pull.ID}
 	}
 
-	if err := c.gql.DoWithContext(ctx, mutation, map[string]any{"id": pull.ID}, nil); err != nil {
+	if err := c.gql.DoWithContext(ctx, mutation, vars, nil); err != nil {
 		return fmt.Errorf("toggle auto-merge: %w", err)
 	}
 
