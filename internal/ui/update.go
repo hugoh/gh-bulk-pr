@@ -378,10 +378,14 @@ func (m Model) reload() (Model, tea.Cmd) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	m.cancel = cancel
-	m.detailCtx = ctx
-	m.fetched = map[string]fetchState{}
-	m.fetching = 0
 	m.detailErr = nil
+
+	for id, state := range m.fetched {
+		if state != fetchInflight {
+			delete(m.fetched, id)
+		}
+	}
+
 	m.refreshInterval = m.refreshEvery
 	m.searchID++
 	m.loading = true
@@ -393,12 +397,12 @@ func (m Model) reload() (Model, tea.Cmd) {
 }
 
 // refreshAll reloads the whole list and, without waiting for it, re-fetches
-// the details of the focused PR.
+// the details of the focused PR unless a request for them is in flight.
 func (m Model) refreshAll() (Model, tea.Cmd) {
 	m, search := m.reload()
 
 	pr, ok := m.focusedPR()
-	if !ok || pr.ID == "" {
+	if !ok || pr.ID == "" || m.fetched[pr.ID] == fetchInflight {
 		return m, search
 	}
 

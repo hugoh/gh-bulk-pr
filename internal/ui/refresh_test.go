@@ -36,7 +36,7 @@ func refreshModel(t *testing.T) Model {
 		}
 	}
 
-	m, _ = m.handleDetailsDone(detailsDoneMsg{searchID: m.searchID, ids: ids, details: details})
+	m, _ = m.handleDetailsDone(detailsDoneMsg{ids: ids, details: details})
 	m.fetching = 0
 
 	return m
@@ -61,7 +61,7 @@ func TestHandleDetailsDone_NoPollWhenDisabled(t *testing.T) {
 
 	m := detailModel(t)
 	m, _ = m.handleDetailsDone(detailsDoneMsg{
-		searchID: m.searchID, ids: []string{idOf(1)}, details: []github.Detail{pendingDetail(1)},
+		ids: []string{idOf(1)}, details: []github.Detail{pendingDetail(1)},
 	})
 
 	assert.False(t, m.refreshArmed)
@@ -123,9 +123,8 @@ func TestHandleDetailsDone_BacksOffWhenNothingChanged(t *testing.T) {
 	m := refreshModel(t)
 	m, _ = m.handleAutoRefresh()
 	m, _ = m.handleDetailsDone(detailsDoneMsg{
-		searchID: m.searchID,
-		ids:      []string{idOf(1), idOf(2)},
-		details:  []github.Detail{pendingDetail(1), pendingDetail(2)},
+		ids:     []string{idOf(1), idOf(2)},
+		details: []github.Detail{pendingDetail(1), pendingDetail(2)},
 	})
 
 	assert.Equal(t, 2*testRefresh, m.refreshInterval)
@@ -137,7 +136,7 @@ func TestHandleDetailsDone_BackoffIsCapped(t *testing.T) {
 	m := refreshModel(t)
 	m.refreshInterval = maxRefreshInterval
 	m, _ = m.handleDetailsDone(detailsDoneMsg{
-		searchID: m.searchID, ids: []string{idOf(1)}, details: []github.Detail{pendingDetail(1)},
+		ids: []string{idOf(1)}, details: []github.Detail{pendingDetail(1)},
 	})
 
 	assert.Equal(t, maxRefreshInterval, m.refreshInterval)
@@ -149,7 +148,7 @@ func TestHandleDetailsDone_ChangeResetsInterval(t *testing.T) {
 	m := refreshModel(t)
 	m.refreshInterval = 4 * testRefresh
 	m, _ = m.handleDetailsDone(detailsDoneMsg{
-		searchID: m.searchID, ids: []string{idOf(1)}, details: []github.Detail{detailFor(1)},
+		ids: []string{idOf(1)}, details: []github.Detail{detailFor(1)},
 	})
 
 	assert.Equal(t, testRefresh, m.refreshInterval)
@@ -161,7 +160,7 @@ func TestHandleDetailsDone_FailureBacksOff(t *testing.T) {
 
 	m := refreshModel(t)
 	m, _ = m.handleDetailsDone(detailsDoneMsg{
-		searchID: m.searchID, ids: []string{idOf(1)}, err: assert.AnError,
+		ids: []string{idOf(1)}, err: assert.AnError,
 	})
 
 	assert.Equal(t, 2*testRefresh, m.refreshInterval)

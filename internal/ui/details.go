@@ -2,6 +2,7 @@ package ui
 
 import (
 	"cmp"
+	"context"
 	"slices"
 	"time"
 
@@ -29,22 +30,21 @@ const (
 	fetchFailed
 )
 
-// detailsDoneMsg carries one details batch. searchID says which search it was
-// asked for: a reload abandons them.
+// detailsDoneMsg carries one details batch. Details belong to a PR, not to
+// the search that listed it, so a batch outlives a reload.
 type detailsDoneMsg struct {
-	searchID int
-	ids      []string
-	details  []github.Detail
-	err      error
+	ids     []string
+	details []github.Detail
+	err     error
 }
 
 func (m Model) detailsCmd(ids []string) tea.Cmd {
-	client, ctx, searchID := m.client, m.detailCtx, m.searchID
+	client := m.client
 
 	return func() tea.Msg {
-		details, err := client.Details(ctx, ids)
+		details, err := client.Details(context.Background(), ids)
 
-		return detailsDoneMsg{searchID: searchID, ids: ids, details: details, err: err}
+		return detailsDoneMsg{ids: ids, details: details, err: err}
 	}
 }
 
@@ -118,10 +118,6 @@ func (m Model) fetchIDs(ids []string) (Model, tea.Cmd) {
 }
 
 func (m Model) handleDetailsDone(msg detailsDoneMsg) (Model, tea.Cmd) {
-	if msg.searchID != m.searchID {
-		return m, nil
-	}
-
 	m.fetching--
 
 	if msg.err != nil {

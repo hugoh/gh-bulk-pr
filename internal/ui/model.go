@@ -85,9 +85,8 @@ type Model struct {
 	cancel   context.CancelFunc
 
 	details   map[string]github.Detail // last known details by PR ID; kept across refreshes
-	fetched   map[string]fetchState    // per PR ID, for the current search only
+	fetched   map[string]fetchState    // per PR ID; a reload forgets all but the requests in flight
 	fetching  int                      // details requests in flight
-	detailCtx context.Context          //nolint:containedctx // ends with the search, like cancel
 	detailErr error                    // last failure loading details; the rows stay usable
 
 	refreshEvery    time.Duration // base poll interval for pending PRs; 0 turns polling off
@@ -191,7 +190,6 @@ func New(client *github.Client, query string) Model {
 		cache:       map[string]github.Page{},
 		details:     map[string]github.Detail{},
 		fetched:     map[string]fetchState{},
-		detailCtx:   context.Background(),
 		loading:     true,
 		markdown:    newMarkdownCache(),
 		spinner:     spin,
