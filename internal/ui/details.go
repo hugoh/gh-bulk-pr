@@ -151,32 +151,58 @@ func (m Model) handleDetailsDone(msg detailsDoneMsg) (Model, tea.Cmd) {
 	return m, tea.Batch(fetch, next)
 }
 
+// reopenSlack is how much later than its close a PR must have been updated to
+// count as reopened. Closing it updates it too, 1-2s later, and an action's
+// own close is stamped with the local clock.
+const reopenSlack = 10 * time.Second
+
 // withStoredDetails fills in every listed PR whose details are known, however
 // old, so a refresh doesn't blank the Checks and Merge columns while it loads.
-// PRs known to be closed are dropped: the search index lists them for a while
-// after they merge. m.prs may be shared with the cache, so it is copied, not
-// edited.
+// When the query asks for open PRs, those known to be closed are dropped: the
+// search index lists them for a while after they close. One updated since it
+// closed was reopened, so its details are forgotten and fetched again. m.prs may be shared with the cache, so it
+// is copied, not edited.
 func (m Model) withStoredDetails() Model {
 	prs := make([]github.PR, 0, len(m.prs))
+	openOnly := isOpen(m.query)
 
 	for _, pull := range m.prs {
-		detail, known := m.details[pull.ID]
-		switch {
-		// shortcut: a PR reopened during the session stays hidden until restart; re-fetch hidden IDs if that matters.
-		case known && detail.Closed:
+		if openOnly && m.knownClosed(pull) {
 			delete(m.selected, keyOf(pull))
 			m.hidden++
 			m.total = max(m.total-1, 0)
-		case known:
-			prs = append(prs, pull.WithDetail(detail))
-		default:
-			prs = append(prs, pull)
+
+			continue
 		}
+
+		if detail, known := m.details[pull.ID]; known {
+			pull = pull.WithDetail(detail)
+		}
+
+		prs = append(prs, pull)
 	}
 
 	m.prs = prs
 
 	return m
+}
+
+// knownClosed reports whether pull was closed when last fetched and hasn't
+// been updated since. One that has was reopened: its details are forgotten.
+func (m Model) knownClosed(pull github.PR) bool {
+	detail, known := m.details[pull.ID]
+	if !known || !detail.Closed {
+		return false
+	}
+
+	if pull.UpdatedAt.After(detail.ClosedAt.Add(reopenSlack)) {
+		delete(m.details, pull.ID)
+		delete(m.fetched, pull.ID)
+
+		return false
+	}
+
+	return true
 }
 
 // followCursor is what moving the cursor sets off: the next page when it is

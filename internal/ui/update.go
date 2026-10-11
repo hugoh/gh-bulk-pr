@@ -357,7 +357,7 @@ func (m Model) markClosed(results []worker.Result) Model {
 			detail = github.Detail{ID: res.PR.ID}
 		}
 
-		detail.Closed = true
+		detail.Closed, detail.ClosedAt = true, time.Now()
 		m.details[res.PR.ID] = detail
 	}
 
@@ -866,7 +866,8 @@ func rowsFor(prs []github.PR, selected map[prKey]bool, fetched map[string]fetchS
 		mark := " "
 		if selected[keyOf(entry)] {
 			mark = "◆"
-		} else if entry.Detailed && (entry.MergeState == github.MergeUnknown || fetched[entry.ID] == fetchInflight) {
+		} else if entry.Detailed && !entry.Closed &&
+			(entry.MergeState == github.MergeUnknown || fetched[entry.ID] == fetchInflight) {
 			mark = refreshingMark
 		}
 

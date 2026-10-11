@@ -26,6 +26,7 @@ type PR struct {
 	Checks     string   // ChecksPass, ChecksFail, ChecksPending, or "" when there are none
 	Pending    []string // names of the checks still running or waiting, e.g. "renovate/stability-days"
 	AutoMerge  bool     // auto-merge is enabled: it merges once its requirements pass
+	Closed     bool     // merged or closed
 	MergeState string   // raw GraphQL mergeStateStatus, e.g. "CLEAN", "BEHIND"
 	Body       string
 	URL        string
@@ -41,9 +42,10 @@ func (p PR) MergesNow() bool {
 
 // Waiting reports whether the PR's state can still change without anyone
 // acting on it: its checks are pending, GitHub hasn't worked out its merge
-// state yet, or auto-merge will merge it.
+// state yet, or auto-merge will merge it. A closed PR waits on nothing.
 func (p PR) Waiting() bool {
-	return p.Detailed && (p.Checks == ChecksPending || p.MergeState == MergeUnknown || p.AutoMerge)
+	return p.Detailed && !p.Closed &&
+		(p.Checks == ChecksPending || p.MergeState == MergeUnknown || p.AutoMerge)
 }
 
 // Detail is what SearchPage leaves out because GitHub computes it per PR and
@@ -51,6 +53,7 @@ func (p PR) Waiting() bool {
 type Detail struct {
 	ID         string
 	Closed     bool // merged or closed; GitHub reports such a PR's merge state as UNKNOWN for good
+	ClosedAt   time.Time
 	AutoMerge  bool
 	Body       string
 	MergeState string
@@ -63,7 +66,7 @@ type Detail struct {
 // WithDetail returns p with d's fields filled in and Detailed set. d's
 // AutoMerge wins over the search's: the search index lags behind.
 func (p PR) WithDetail(d Detail) PR {
-	p.AutoMerge, p.Body, p.MergeState, p.Checks = d.AutoMerge, d.Body, d.MergeState, d.Checks
+	p.AutoMerge, p.Closed, p.Body, p.MergeState, p.Checks = d.AutoMerge, d.Closed, d.Body, d.MergeState, d.Checks
 	p.Pending, p.Labels, p.Reviewers = d.Pending, d.Labels, d.Reviewers
 	p.Detailed = true
 
@@ -143,6 +146,7 @@ query($ids: [ID!]!) {
     ... on PullRequest {
       id
       state
+      closedAt
       autoMergeRequest { enabledAt }
       body
       mergeStateStatus
@@ -195,6 +199,7 @@ type detailsResponse struct {
 type detailNode struct {
 	ID               string
 	State            string
+	ClosedAt         time.Time
 	AutoMergeRequest *struct{ EnabledAt string }
 	Body             string
 	MergeStateStatus string
@@ -323,6 +328,7 @@ func detailFromNode(node detailNode) Detail {
 	result := Detail{
 		ID:         node.ID,
 		Closed:     node.closed(),
+		ClosedAt:   node.ClosedAt,
 		AutoMerge:  node.AutoMergeRequest != nil,
 		Body:       node.Body,
 		MergeState: node.MergeStateStatus,

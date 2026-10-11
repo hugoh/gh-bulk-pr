@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/hugoh/gh-bulk-pr/internal/github"
@@ -32,7 +33,7 @@ func detailModel(t *testing.T) Model {
 func detailModelSized(t *testing.T, height int) Model {
 	t.Helper()
 
-	m := New(nil, "q").handleResize(tea.WindowSizeMsg{Width: 100, Height: height})
+	m := New(nil, "is:open q").handleResize(tea.WindowSizeMsg{Width: 100, Height: height})
 
 	return m.handleSearchDone(searchDoneMsg{
 		PRs:   manyPRs(1, 50, false),
@@ -345,4 +346,54 @@ func TestHandleSearchDone_KeepsKnownClosedPRsOut(t *testing.T) {
 
 	assert.Len(t, m.prs, 59)
 	assert.Equal(t, 59, m.total, "the hidden PR stays out of the total on later pages")
+}
+
+func TestWithStoredDetails_ShowsPRsReopenedSinceTheyClosed(t *testing.T) {
+	t.Parallel()
+
+	closedAt := time.Date(2026, 10, 11, 12, 0, 0, 0, time.UTC)
+
+	tests := []struct {
+		name      string
+		updatedAt time.Time
+		shown     bool
+	}{
+		{"stale index entry from before the close", closedAt.Add(-time.Hour), false},
+		{"updated by the close itself", closedAt.Add(time.Second), false},
+		{"updated well after the close", closedAt.Add(time.Hour), true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			m := detailModel(t)
+			m.details[idOf(1)] = github.Detail{ID: idOf(1), Closed: true, ClosedAt: closedAt}
+			prs := manyPRs(1, 50, false)
+			prs[0].UpdatedAt = tt.updatedAt
+
+			m = m.handleSearchDone(searchDoneMsg{PRs: prs, Total: 50, id: m.searchID, query: "q"})
+
+			assert.Equal(t, tt.shown, m.prs[0].ID == idOf(1))
+
+			if tt.shown {
+				assert.False(t, m.prs[0].Detailed, "its details are fetched again")
+				assert.Contains(t, m.wantedDetails(), idOf(1))
+			}
+		})
+	}
+}
+
+func TestWithStoredDetails_ShowsClosedPRsWhenTheQueryAsksForThem(t *testing.T) {
+	t.Parallel()
+
+	m := New(nil, "is:closed is:pr").handleResize(tea.WindowSizeMsg{Width: 100, Height: 30})
+	m.details[idOf(1)] = github.Detail{ID: idOf(1), Closed: true, MergeState: github.MergeUnknown}
+
+	m = m.handleSearchDone(searchDoneMsg{PRs: manyPRs(1, 2, false), Total: 2, query: m.query})
+
+	require.Len(t, m.prs, 2)
+	assert.Equal(t, 2, m.total)
+	assert.False(t, m.prs[0].Waiting(), "a closed PR waits on nothing")
+	assert.NotEqual(t, refreshingMark, m.table.Rows()[0][0])
 }

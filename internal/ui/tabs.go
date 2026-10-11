@@ -61,6 +61,10 @@ func toggleTerm(query, term string) string {
 	return strings.Join(words, " ")
 }
 
+func isOpen(query string) bool {
+	return slices.Contains(strings.Fields(query), stateOpen)
+}
+
 func isClosed(query string) bool {
 	return slices.Contains(strings.Fields(query), stateClosed)
 }

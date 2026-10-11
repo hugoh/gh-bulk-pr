@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/cli/go-gh/v2/pkg/api"
 	"github.com/stretchr/testify/assert"
@@ -265,6 +266,7 @@ const detailsResponseJSON = `{
       {
         "id": "PR_node3",
         "state": "MERGED",
+        "closedAt": "2026-10-11T15:55:34Z",
         "mergeStateStatus": "DIRTY",
         "commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": "ERROR"}}}]}
       }
@@ -300,6 +302,7 @@ func TestDetails(t *testing.T) {
 	assert.Equal(t, ChecksFail, details[1].Checks)
 	assert.Equal(t, "DIRTY", details[1].MergeState)
 	assert.True(t, details[1].Closed, "a merged PR is closed")
+	assert.Equal(t, time.Date(2026, 10, 11, 15, 55, 34, 0, time.UTC), details[1].ClosedAt)
 }
 
 func TestDetails_NoIDsSendsNothing(t *testing.T) {
@@ -507,6 +510,7 @@ func TestPR_Waiting(t *testing.T) {
 		},
 		"failing":            {PR{Detailed: true, Checks: ChecksFail}, false},
 		"auto-merge on":      {PR{Detailed: true, Checks: ChecksPass, AutoMerge: true}, true},
+		"closed":             {PR{Detailed: true, Closed: true, MergeState: MergeUnknown}, false},
 		"details not loaded": {PR{Checks: ChecksPending}, false},
 	}
 
