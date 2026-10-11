@@ -2026,3 +2026,45 @@ func TestRowsFor_MarksRequestedRebases(t *testing.T) {
 
 	assert.Equal(t, refreshingMark, rows[0][0])
 }
+
+func TestStartAction_CloseNotesWhatBotsDo(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		author string
+		body   string
+		want   string
+	}{
+		{"renovate", "renovate", renovateTestBody, "Renovate ignores this update from now on"},
+		{"dependabot", "dependabot", "", "Dependabot skips this version from now on"},
+		{"person", testAuthor, "", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			m := loadedModel()
+			m.prs[0].Author, m.prs[0].Body = tt.author, tt.body
+
+			m, _ = m.handleListKeyByString("c")
+
+			require.Equal(t, screenConfirm, m.screen)
+			assert.Equal(t, tt.want, m.action.note(m.prs[0]))
+			assert.True(t, m.action.destructive)
+		})
+	}
+}
+
+func TestStartAction_CloseNeedsLoadedDetails(t *testing.T) {
+	t.Parallel()
+
+	m := loadedModel()
+	m.prs[0].Detailed = false
+
+	m, _ = m.handleListKeyByString("c")
+
+	assert.Equal(t, screenList, m.screen)
+	assert.NotEmpty(t, m.notice, "whether it is Renovate's isn't known yet")
+}

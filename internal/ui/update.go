@@ -639,7 +639,7 @@ func (m Model) startAction(actionKey string) (Model, tea.Cmd) {
 	}
 
 	// what these do to a PR depends on its details: whether it is clean, or Renovate's
-	if slices.Contains([]string{"a", "u", "U"}, actionKey) &&
+	if slices.Contains([]string{"a", "c", "u", "U"}, actionKey) &&
 		slices.ContainsFunc(m.targetPRs(), func(pr github.PR) bool { return !pr.Detailed }) {
 		m.notice = "still loading PR details: try again in a moment"
 

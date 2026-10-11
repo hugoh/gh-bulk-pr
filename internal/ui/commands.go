@@ -107,6 +107,7 @@ func actionsForKey(client *github.Client, actionKey, input string) *pendingActio
 			destructive: true,
 			run:         client.ClosePR,
 			closes:      always,
+			note:        closeNote,
 		}
 	case "m":
 		return &pendingAction{
@@ -167,6 +168,18 @@ func updateAction(client *github.Client, onGitHub bool) *pendingAction {
 		},
 		note: botNote("rebase via %s"),
 	}
+}
+
+// closeNote says what closing a bot's PR unmerged tells the bot.
+func closeNote(pr github.PR) string {
+	switch pr.Bot() {
+	case "Renovate":
+		return "Renovate ignores this update from now on"
+	case "Dependabot":
+		return "Dependabot skips this version from now on"
+	}
+
+	return ""
 }
 
 // botNote notes format, filled in with the bot's name, on the PRs a bot
