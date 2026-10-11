@@ -524,6 +524,8 @@ func TestPR_Waiting(t *testing.T) {
 	}
 }
 
+const plainBody = "Plain PR."
+
 const renovateBody = "Update foo.\n\n - [ ] <!-- rebase-check -->If you want to rebase/retry this PR, check this box\n"
 
 // prBody is the JSON a PR's body is read and written as.
@@ -543,7 +545,7 @@ func TestRequestRebase(t *testing.T) {
 	}{
 		"ticks the box":     {current: renovateBody, want: ticked},
 		"already requested": {current: ticked},
-		"not a renovate pr": {current: "Plain PR.", wantErr: true},
+		"not a renovate pr": {current: plainBody, wantErr: true},
 	}
 
 	for name, tt := range tests {
@@ -594,10 +596,56 @@ func TestPR_Renovate(t *testing.T) {
 	assert.True(t, PR{Body: renovateBody}.Renovate())
 	assert.False(t, PR{Body: renovateBody}.RebaseRequested())
 	assert.True(t, PR{Body: ticked}.RebaseRequested())
-	assert.False(t, PR{Body: "Plain PR."}.Renovate())
+	assert.False(t, PR{Body: plainBody}.Renovate())
 	assert.True(
 		t,
 		PR{Detailed: true, Checks: ChecksPass, Body: ticked}.Waiting(),
 		"it waits on Renovate",
 	)
+}
+
+func TestRequestRebase_AsksDependabotInAComment(t *testing.T) {
+	t.Parallel()
+
+	var gotMethod, gotPath string
+
+	var written prBody
+
+	rest := newTestRESTClient(t, func(r *http.Request) (*http.Response, error) {
+		gotMethod, gotPath = r.Method, r.URL.Path
+		if err := json.NewDecoder(r.Body).Decode(&written); err != nil {
+			return nil, fmt.Errorf("decode comment: %w", err)
+		}
+
+		return jsonResponse("{}"), nil
+	})
+
+	pr := PR{Repo: testRepo, Number: 7, Author: dependabotLogin}
+	require.NoError(t, (&Client{rest: rest}).RequestRebase(context.Background(), pr))
+
+	assert.Equal(t, http.MethodPost, gotMethod)
+	assert.Equal(t, "/repos/hugoh/gh-bulk-pr/issues/7/comments", gotPath)
+	assert.Equal(t, "@dependabot rebase", written.Body)
+}
+
+func TestPR_Bot(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		pr   PR
+		want string
+	}{
+		"renovate":          {PR{Author: "renovate", Body: renovateBody}, "Renovate"},
+		"self-hosted bot":   {PR{Author: "my-renovate", Body: renovateBody}, "Renovate"},
+		"dependabot":        {PR{Author: dependabotLogin}, "Dependabot"},
+		"dependabot (REST)": {PR{Author: "dependabot[bot]"}, "Dependabot"},
+		"person":            {PR{Author: "hugoh", Body: plainBody}, ""},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, tt.pr.Bot())
+		})
+	}
 }

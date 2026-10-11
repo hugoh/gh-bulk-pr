@@ -143,15 +143,15 @@ func actionsForKey(client *github.Client, actionKey, input string) *pendingActio
 
 func always(github.PR) bool { return true }
 
-// updateAction brings a PR's branch up to date. Renovate's PRs are rebased
-// by Renovate unless onGitHub: GitHub's update commit makes Renovate leave
-// the PR alone from then on.
+// updateAction brings a PR's branch up to date. A bot's PRs are rebased by
+// the bot unless onGitHub: GitHub's update commit makes the bot leave the PR
+// alone from then on.
 func updateAction(client *github.Client, onGitHub bool) *pendingAction {
 	if onGitHub {
 		return &pendingAction{
 			label: "update branch (GitHub)",
 			run:   client.UpdateBranch,
-			note:  renovateNote("Renovate stops updating this PR"),
+			note:  botNote("%s stops updating this PR"),
 			warns: true,
 		}
 	}
@@ -159,21 +159,22 @@ func updateAction(client *github.Client, onGitHub bool) *pendingAction {
 	return &pendingAction{
 		label: "update branch",
 		run: func(ctx context.Context, pr github.PR) error {
-			if pr.Renovate() {
+			if pr.Bot() != "" {
 				return client.RequestRebase(ctx, pr)
 			}
 
 			return client.UpdateBranch(ctx, pr)
 		},
-		note: renovateNote("rebase via Renovate"),
+		note: botNote("rebase via %s"),
 	}
 }
 
-// renovateNote notes text on the PRs Renovate manages.
-func renovateNote(text string) func(github.PR) string {
+// botNote notes format, filled in with the bot's name, on the PRs a bot
+// manages.
+func botNote(format string) func(github.PR) string {
 	return func(pr github.PR) string {
-		if pr.Renovate() {
-			return text
+		if bot := pr.Bot(); bot != "" {
+			return fmt.Sprintf(format, bot)
 		}
 
 		return ""

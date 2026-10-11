@@ -1957,26 +1957,37 @@ const renovateTestBody = "Update foo.\n\n" +
 func TestStartAction_UpdateBranch(t *testing.T) {
 	t.Parallel()
 
+	const (
+		renovate, dependabot = "renovate", "dependabot"
+		update, onGitHub     = "update branch", "update branch (GitHub)"
+	)
+
 	tests := []struct {
 		key             string
-		renovate        bool
+		bot             string
 		wantLabel       string
 		wantNote        string
 		wantDestructive bool
 	}{
-		{"u", false, "update branch", "", false},
-		{"u", true, "update branch", "rebase via Renovate", false},
-		{"U", false, "update branch (GitHub)", "", false},
-		{"U", true, "update branch (GitHub)", "Renovate stops updating this PR", true},
+		{"u", "", update, "", false},
+		{"u", renovate, update, "rebase via Renovate", false},
+		{"u", dependabot, update, "rebase via Dependabot", false},
+		{"U", "", onGitHub, "", false},
+		{"U", renovate, onGitHub, "Renovate stops updating this PR", true},
+		{"U", dependabot, onGitHub, "Dependabot stops updating this PR", true},
 	}
 
 	for _, tt := range tests {
-		t.Run(fmt.Sprintf("%s renovate=%v", tt.key, tt.renovate), func(t *testing.T) {
+		t.Run(tt.key+" "+tt.bot, func(t *testing.T) {
 			t.Parallel()
 
 			m := loadedModel()
-			if tt.renovate {
+
+			switch tt.bot {
+			case renovate:
 				m.prs[0].Body = renovateTestBody
+			case dependabot:
+				m.prs[0].Author = dependabot
 			}
 
 			m, _ = m.handleListKeyByString(tt.key)
