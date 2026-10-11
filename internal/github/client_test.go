@@ -251,6 +251,7 @@ const detailsResponseJSON = `{
       {
         "id": "PR_node1",
         "state": "OPEN",
+        "autoMergeRequest": {"enabledAt": "2026-10-11T15:00:00Z"},
         "body": "body",
         "mergeStateStatus": "BEHIND",
         "labels": {"nodes": [{"name": "bug"}]},
@@ -290,6 +291,7 @@ func TestDetails(t *testing.T) {
 	assert.Equal(t, Detail{
 		ID:         "PR_node1",
 		Body:       "body",
+		AutoMerge:  true,
 		MergeState: "BEHIND",
 		Checks:     ChecksPass,
 		Labels:     []string{"bug"},
@@ -336,7 +338,7 @@ func TestPR_WithDetail(t *testing.T) {
 
 	assert.True(t, full.Detailed)
 	assert.Equal(t, "Fix", full.Title, "the search's fields are kept")
-	assert.True(t, full.AutoMerge)
+	assert.False(t, full.AutoMerge, "the details are fresher than the search index")
 	assert.Equal(t, "b", full.Body)
 	assert.Equal(t, MergeClean, full.MergeState)
 	assert.Equal(t, ChecksPass, full.Checks)
@@ -504,6 +506,7 @@ func TestPR_Waiting(t *testing.T) {
 			false,
 		},
 		"failing":            {PR{Detailed: true, Checks: ChecksFail}, false},
+		"auto-merge on":      {PR{Detailed: true, Checks: ChecksPass, AutoMerge: true}, true},
 		"details not loaded": {PR{Checks: ChecksPending}, false},
 	}
 

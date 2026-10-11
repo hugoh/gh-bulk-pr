@@ -386,7 +386,6 @@ func (m Model) reload() (Model, tea.Cmd) {
 		}
 	}
 
-	m.refreshInterval = m.refreshEvery
 	m.searchID++
 	m.loading = true
 	m.loadingMore = false
@@ -844,6 +843,12 @@ func (m Model) applyOnDone(results []worker.Result) Model {
 	for _, res := range results {
 		if idx, ok := position[keyOf(res.PR)]; ok && res.Err == nil {
 			m.action.onDone(&m.prs[idx])
+
+			// so that re-applying the stored details doesn't undo the change
+			if detail, known := m.details[res.PR.ID]; known {
+				detail.AutoMerge = m.prs[idx].AutoMerge
+				m.details[res.PR.ID] = detail
+			}
 		}
 	}
 

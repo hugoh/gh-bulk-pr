@@ -40,10 +40,10 @@ func (p PR) MergesNow() bool {
 }
 
 // Waiting reports whether the PR's state can still change without anyone
-// acting on it: its checks are pending or GitHub hasn't worked out its merge
-// state yet.
+// acting on it: its checks are pending, GitHub hasn't worked out its merge
+// state yet, or auto-merge will merge it.
 func (p PR) Waiting() bool {
-	return p.Detailed && (p.Checks == ChecksPending || p.MergeState == MergeUnknown)
+	return p.Detailed && (p.Checks == ChecksPending || p.MergeState == MergeUnknown || p.AutoMerge)
 }
 
 // Detail is what SearchPage leaves out because GitHub computes it per PR and
@@ -51,6 +51,7 @@ func (p PR) Waiting() bool {
 type Detail struct {
 	ID         string
 	Closed     bool // merged or closed; GitHub reports such a PR's merge state as UNKNOWN for good
+	AutoMerge  bool
 	Body       string
 	MergeState string
 	Checks     string
@@ -59,9 +60,10 @@ type Detail struct {
 	Reviewers  []string
 }
 
-// WithDetail returns p with d's fields filled in and Detailed set.
+// WithDetail returns p with d's fields filled in and Detailed set. d's
+// AutoMerge wins over the search's: the search index lags behind.
 func (p PR) WithDetail(d Detail) PR {
-	p.Body, p.MergeState, p.Checks = d.Body, d.MergeState, d.Checks
+	p.AutoMerge, p.Body, p.MergeState, p.Checks = d.AutoMerge, d.Body, d.MergeState, d.Checks
 	p.Pending, p.Labels, p.Reviewers = d.Pending, d.Labels, d.Reviewers
 	p.Detailed = true
 
@@ -141,6 +143,7 @@ query($ids: [ID!]!) {
     ... on PullRequest {
       id
       state
+      autoMergeRequest { enabledAt }
       body
       mergeStateStatus
       labels(first: 20) { nodes { name } }
@@ -192,6 +195,7 @@ type detailsResponse struct {
 type detailNode struct {
 	ID               string
 	State            string
+	AutoMergeRequest *struct{ EnabledAt string }
 	Body             string
 	MergeStateStatus string
 	Labels           struct {
@@ -319,6 +323,7 @@ func detailFromNode(node detailNode) Detail {
 	result := Detail{
 		ID:         node.ID,
 		Closed:     node.closed(),
+		AutoMerge:  node.AutoMergeRequest != nil,
 		Body:       node.Body,
 		MergeState: node.MergeStateStatus,
 	}

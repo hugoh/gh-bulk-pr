@@ -89,9 +89,9 @@ type Model struct {
 	fetching  int                      // details requests in flight
 	detailErr error                    // last failure loading details; the rows stay usable
 
-	refreshEvery    time.Duration // base poll interval for pending PRs; 0 turns polling off
-	refreshInterval time.Duration // current interval, backed off while polls find nothing new
-	refreshArmed    bool          // a poll tick is scheduled
+	refreshEvery time.Duration   // base poll interval for waiting PRs; 0 turns polling off
+	polls        map[string]poll // per PR ID, the listed PRs waiting on something
+	pollArmed    bool            // a look for due polls is scheduled
 
 	cancelMore context.CancelFunc // stops the further page being fetched, if any
 
@@ -190,6 +190,7 @@ func New(client *github.Client, query string) Model {
 		cache:       map[string]github.Page{},
 		details:     map[string]github.Detail{},
 		fetched:     map[string]fetchState{},
+		polls:       map[string]poll{},
 		loading:     true,
 		markdown:    newMarkdownCache(),
 		spinner:     spin,

@@ -32,7 +32,7 @@ func Register(flagSet *flag.FlagSet) *Options {
 		&opts.Refresh,
 		"refresh",
 		defaultRefresh,
-		"how often to re-check PRs whose checks are pending, e.g. 30s (0 turns it off)",
+		"how often to re-check PRs waiting on checks, merge state or auto-merge, e.g. 30s (0 turns it off)",
 	)
 	flagSet.BoolVar(&opts.Version, "version", false, "print version and exit")
 

@@ -1933,3 +1933,20 @@ func TestToggleTerm(t *testing.T) {
 	assert.Equal(t, "is:pr x", toggleTerm("is:pr  x", "y")[:len("is:pr x")])
 	assert.Equal(t, "is:pr x", toggleTerm("is:pr x y", "y"))
 }
+
+func TestApplyOnDone_KeepsStoredDetailsInStep(t *testing.T) {
+	t.Parallel()
+
+	m := detailModel(t)
+	m, _ = m.handleDetailsDone(
+		detailsDoneMsg{ids: []string{idOf(1)}, details: []github.Detail{detailFor(1)}},
+	)
+	m.details[idOf(1)] = github.Detail{ID: idOf(1), MergeState: "BLOCKED"}
+	m = m.withStoredDetails()
+	m.action = actionsForKey(nil, "a", "")
+
+	m = m.applyOnDone([]worker.Result{{PR: m.prs[0]}})
+	m = m.withStoredDetails()
+
+	assert.True(t, m.prs[0].AutoMerge, "a later refresh of the rows doesn't undo the toggle")
+}

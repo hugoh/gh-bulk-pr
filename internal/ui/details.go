@@ -127,11 +127,11 @@ func (m Model) handleDetailsDone(msg detailsDoneMsg) (Model, tea.Cmd) {
 
 		m.detailErr = msg.err
 
-		return m.backOff().scheduleRefresh()
+		return m.schedulePolls(msg.ids, nil, time.Now()).armPoll()
 	}
 
 	m.detailErr = nil
-	m = m.adjustInterval(msg.details)
+	changed := m.detailsChanged(msg.details)
 
 	for _, id := range msg.ids {
 		m.fetched[id] = fetchDone
@@ -143,27 +143,12 @@ func (m Model) handleDetailsDone(msg detailsDoneMsg) (Model, tea.Cmd) {
 
 	m.lastUpdated = time.Now()
 	m = m.withStoredDetails().refreshRows()
+	m = m.schedulePolls(msg.ids, changed, m.lastUpdated)
 
 	m, fetch := m.fetchDetails()
-	m, next := m.scheduleRefresh()
+	m, next := m.armPoll()
 
 	return m, tea.Batch(fetch, next)
-}
-
-// adjustInterval returns polling to its base rate when any detail differs from
-// the last known one, and slows it down when none does.
-func (m Model) adjustInterval(details []github.Detail) Model {
-	for _, detail := range details {
-		old, known := m.details[detail.ID]
-		if !known || old.Checks != detail.Checks || old.MergeState != detail.MergeState ||
-			!slices.Equal(old.Pending, detail.Pending) {
-			m.refreshInterval = m.refreshEvery
-
-			return m
-		}
-	}
-
-	return m.backOff()
 }
 
 // withStoredDetails fills in every listed PR whose details are known, however
