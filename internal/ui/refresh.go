@@ -79,11 +79,8 @@ func (m Model) detailsChanged(details []github.Detail) map[string]bool {
 			old.MergeState != detail.MergeState ||
 			old.AutoMerge != detail.AutoMerge ||
 			!slices.Equal(old.Pending, detail.Pending) ||
-			github.PR{
-				Body: old.Body,
-			}.RebaseRequested() != github.PR{
-				Body: detail.Body,
-			}.RebaseRequested()
+			github.PR{Body: old.Body, Labels: old.Labels}.RebaseRequested() !=
+				github.PR{Body: detail.Body, Labels: detail.Labels}.RebaseRequested()
 	}
 
 	return changed

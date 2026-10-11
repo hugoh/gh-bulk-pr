@@ -79,10 +79,10 @@ Every action asks for confirmation before running. Close and merge need an expli
 
 ## Bot-aware actions
 
-Dependency bots stop updating a branch someone else has pushed to, and GitHub's update commit is authored by you. So for their PRs, some actions ask the bot instead. A PR is [Renovate](https://docs.renovatebot.com)'s when its body has Renovate's rebase/retry checkbox, which is known once its details have loaded, and [Dependabot](https://docs.github.com/code-security/dependabot)'s when Dependabot opened it.
+Dependency bots stop updating a branch someone else has pushed to, and GitHub's update commit is authored by you. So for their PRs, some actions ask the bot instead. A PR is [Renovate](https://docs.renovatebot.com)'s when the Renovate app opened it, or, for a self-hosted Renovate, when its body has Renovate's rebase/retry checkbox, which is known once its details have loaded; it is [Dependabot](https://docs.github.com/code-security/dependabot)'s when Dependabot opened it.
 
-- `u` asks the bot to rebase the PR instead of updating it on GitHub. For Renovate it ticks the checkbox, reading the body just before writing it back since Renovate rewrites it; for Dependabot it comments `@dependabot rebase`. The confirm and results screens mark those PRs `rebase via Renovate` or `rebase via Dependabot`; other selected PRs get a normal update.
-- While Renovate's box stays ticked, the row shows `↻`, the preview says `rebase requested`, and the PR is re-checked until Renovate unticks it. Dependabot leaves no such mark, so its PRs show the rebase once their checks restart.
+- `u` asks the bot to rebase the PR instead of updating it on GitHub. For Renovate it adds the `rebase` label (Renovate's default `rebaseLabel`), which also works when Renovate cut a long body before its checkbox; for Dependabot it comments `@dependabot rebase`. The confirm and results screens mark those PRs `rebase via Renovate` or `rebase via Dependabot`; other selected PRs get a normal update.
+- While the `rebase` label stays on, or Renovate's box stays ticked, the row shows `↻`, the preview says `rebase requested`, and the PR is re-checked until Renovate removes it. Dependabot leaves no such mark, so its PRs show the rebase once their checks restart.
 - `U` updates on GitHub anyway. On a bot's PR the confirm screen warns `Renovate stops updating this PR` (or Dependabot) and needs an explicit `y`; on other PRs it is the same as `u`.
 - `c` notes what closing tells the bot: `Renovate ignores this update from now on`, `Dependabot skips this version from now on`.
 

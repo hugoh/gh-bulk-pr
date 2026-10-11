@@ -162,6 +162,9 @@ func TestHandleDetailsDone_PollIntervals(t *testing.T) {
 	changed := pendingDetail(1)
 	changed.Pending = []string{"build"}
 
+	rebaseLabeled := pendingDetail(1)
+	rebaseLabeled.Labels = []string{"rebase"}
+
 	tests := []struct {
 		name   string
 		start  time.Duration
@@ -172,6 +175,7 @@ func TestHandleDetailsDone_PollIntervals(t *testing.T) {
 		{"unchanged backs off", testRefresh, pendingDetail(1), nil, 2 * testRefresh},
 		{"backoff is capped", maxRefreshInterval, pendingDetail(1), nil, maxRefreshInterval},
 		{"a change resets it", 4 * testRefresh, changed, nil, testRefresh},
+		{"a rebase label resets it", 4 * testRefresh, rebaseLabeled, nil, testRefresh},
 		{"a failure backs off", testRefresh, github.Detail{}, assert.AnError, 2 * testRefresh},
 	}
 
