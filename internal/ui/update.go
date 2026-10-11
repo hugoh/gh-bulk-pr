@@ -457,7 +457,7 @@ func (m Model) handleListKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	case key.Matches(
 		msg, keys.Checks, keys.Open, keys.OpenAll, keys.Copy, keys.State,
 		keys.Author, keys.Tab,
-		keys.Label, keys.Close, keys.Merge, keys.AutoMerge, keys.Update,
+		keys.Label, keys.Close, keys.Merge, keys.AutoMerge, keys.Update, keys.UpdateGitHub,
 	):
 		return m.handleCommandKey(msg, openArmed)
 	}
@@ -638,7 +638,8 @@ func (m Model) startAction(actionKey string) (Model, tea.Cmd) {
 		return m, nil
 	}
 
-	if actionKey == "a" &&
+	// what these do to a PR depends on its details: whether it is clean, or Renovate's
+	if slices.Contains([]string{"a", "u", "U"}, actionKey) &&
 		slices.ContainsFunc(m.targetPRs(), func(pr github.PR) bool { return !pr.Detailed }) {
 		m.notice = "still loading PR details: try again in a moment"
 
@@ -646,7 +647,7 @@ func (m Model) startAction(actionKey string) (Model, tea.Cmd) {
 	}
 
 	m.action = actionsForKey(m.client, actionKey, "")
-	if m.action != nil && m.action.note != nil {
+	if m.action != nil && m.action.warns {
 		note := m.action.note
 		m.action.destructive = slices.ContainsFunc(
 			m.targetPRs(),
@@ -867,7 +868,7 @@ func rowsFor(prs []github.PR, selected map[prKey]bool, fetched map[string]fetchS
 		if selected[keyOf(entry)] {
 			mark = "◆"
 		} else if entry.Detailed && !entry.Closed &&
-			(entry.MergeState == github.MergeUnknown || fetched[entry.ID] == fetchInflight) {
+			(entry.MergeState == github.MergeUnknown || entry.RebaseRequested() || fetched[entry.ID] == fetchInflight) {
 			mark = refreshingMark
 		}
 

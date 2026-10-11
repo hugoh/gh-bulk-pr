@@ -1159,3 +1159,35 @@ func TestViewAfterLeavingResultsShowsRefreshingAndReducedTotal(t *testing.T) {
 	assert.Contains(t, view, "of 9")
 	assert.NotContains(t, view, "of 10")
 }
+
+func TestResultsBody_ShowsNotesOfSucceededPRs(t *testing.T) {
+	t.Parallel()
+
+	m := afterAction("u")
+	m.prs[0].Body = renovateTestBody
+	m.prs[1].Body = renovateTestBody
+	m.results = []worker.Result{{PR: m.prs[0]}, {PR: m.prs[1], Err: errors.New("boom")}}
+
+	lines := strings.Split(ansi.Strip(m.resultsBody()), "\n")
+
+	assert.NotContains(
+		t,
+		lines[0],
+		"rebase via Renovate",
+		"the failure comes first, without the note",
+	)
+	assert.Contains(t, lines[1], "rebase via Renovate")
+}
+
+func TestPreview_ShowsRequestedRebase(t *testing.T) {
+	t.Parallel()
+
+	requested := github.PR{Body: strings.Replace(renovateTestBody, "[ ]", "[x]", 1)}
+
+	assert.Contains(t, ansi.Strip(previewText(requested, "")), "rebase requested")
+	assert.NotContains(
+		t,
+		ansi.Strip(previewText(github.PR{Body: renovateTestBody}, "")),
+		"rebase requested",
+	)
+}

@@ -6,8 +6,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/cli/go-gh/v2/pkg/api"
@@ -42,11 +44,28 @@ func (p PR) MergesNow() bool {
 
 // Waiting reports whether the PR's state can still change without anyone
 // acting on it: its checks are pending, GitHub hasn't worked out its merge
-// state yet, or auto-merge will merge it. A closed PR waits on nothing.
+// state yet, auto-merge will merge it, or Renovate has a rebase to do. A
+// closed PR waits on nothing.
 func (p PR) Waiting() bool {
 	return p.Detailed && !p.Closed &&
-		(p.Checks == ChecksPending || p.MergeState == MergeUnknown || p.AutoMerge)
+		(p.Checks == ChecksPending || p.MergeState == MergeUnknown || p.AutoMerge || p.RebaseRequested())
 }
+
+// Renovate's PR bodies end with a checkbox that asks it to rebase or retry
+// the PR when ticked; it unticks it once done.
+const (
+	rebaseBox    = "<!-- rebase-check -->"
+	rebaseBoxOff = "[ ] " + rebaseBox
+	rebaseBoxOn  = "[x] " + rebaseBox
+)
+
+// Renovate reports whether Renovate manages the PR, so a rebase is asked of
+// it rather than done on GitHub (see RequestRebase).
+func (p PR) Renovate() bool { return strings.Contains(p.Body, rebaseBox) }
+
+// RebaseRequested reports whether Renovate has been asked to rebase the PR
+// and hasn't yet.
+func (p PR) RebaseRequested() bool { return strings.Contains(p.Body, rebaseBoxOn) }
 
 // Detail is what SearchPage leaves out because GitHub computes it per PR and
 // it is slow: merge state, check rollup, labels, reviewers and body.
@@ -395,6 +414,30 @@ func (c *Client) UpdateBranch(ctx context.Context, pr PR) error {
 		fmt.Sprintf("repos/%s/pulls/%d/update-branch", pr.Repo, pr.Number),
 		struct{}{})
 }
+
+// RequestRebase asks Renovate to rebase or retry the PR by ticking its
+// checkbox. The body is read just before writing it back, since Renovate
+// rewrites it.
+func (c *Client) RequestRebase(ctx context.Context, pr PR) error {
+	path := fmt.Sprintf("repos/%s/pulls/%d", pr.Repo, pr.Number)
+
+	var current struct{ Body string }
+	if err := c.rest.DoWithContext(ctx, http.MethodGet, path, nil, &current); err != nil {
+		return fmt.Errorf("request rebase: %w", err)
+	}
+
+	switch {
+	case strings.Contains(current.Body, rebaseBoxOn):
+		return nil
+	case !strings.Contains(current.Body, rebaseBoxOff):
+		return errNotRenovate
+	}
+
+	return c.do(ctx, "request rebase", http.MethodPatch, path,
+		map[string]string{"body": strings.Replace(current.Body, rebaseBoxOff, rebaseBoxOn, 1)})
+}
+
+var errNotRenovate = errors.New("request rebase: no Renovate rebase checkbox in the PR body")
 
 const (
 	enableAutoMergeMutation = `

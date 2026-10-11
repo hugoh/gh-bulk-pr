@@ -560,6 +560,15 @@ func previewHead(item github.PR) string {
 		)
 	}
 
+	if item.RebaseRequested() {
+		fmt.Fprintf(
+			&buf,
+			"%s %s\n",
+			helpStyle().Render("renovate:"),
+			previewLabelStyle().Render("rebase requested"),
+		)
+	}
+
 	if len(item.Reviewers) > 0 {
 		fmt.Fprintf(
 			&buf,
@@ -671,6 +680,8 @@ func (m Model) resultsBody() string {
 		status := okStyle().Render("✓")
 		if res.Err != nil {
 			status = errStyle().Render("✗ " + res.Err.Error())
+		} else if m.action != nil && m.action.note != nil && m.action.note(res.PR) != "" {
+			status += "  → " + m.action.note(res.PR)
 		}
 
 		lines[idx] = fmt.Sprintf(

@@ -115,13 +115,14 @@ func actionsForKey(client *github.Client, actionKey, input string) *pendingActio
 			run:         client.MergePR,
 			closes:      always,
 		}
-	case "u":
-		return &pendingAction{label: "update branch", run: client.UpdateBranch}
+	case "u", "U":
+		return updateAction(client, actionKey == "U")
 	case "a":
 		return &pendingAction{
 			label:  "toggle auto-merge",
 			run:    client.ToggleAutoMerge,
 			closes: github.PR.MergesNow,
+			warns:  true,
 			onDone: func(pr *github.PR) {
 				if !pr.MergesNow() {
 					pr.AutoMerge = !pr.AutoMerge
@@ -141,6 +142,43 @@ func actionsForKey(client *github.Client, actionKey, input string) *pendingActio
 }
 
 func always(github.PR) bool { return true }
+
+// updateAction brings a PR's branch up to date. Renovate's PRs are rebased
+// by Renovate unless onGitHub: GitHub's update commit makes Renovate leave
+// the PR alone from then on.
+func updateAction(client *github.Client, onGitHub bool) *pendingAction {
+	if onGitHub {
+		return &pendingAction{
+			label: "update branch (GitHub)",
+			run:   client.UpdateBranch,
+			note:  renovateNote("Renovate stops updating this PR"),
+			warns: true,
+		}
+	}
+
+	return &pendingAction{
+		label: "update branch",
+		run: func(ctx context.Context, pr github.PR) error {
+			if pr.Renovate() {
+				return client.RequestRebase(ctx, pr)
+			}
+
+			return client.UpdateBranch(ctx, pr)
+		},
+		note: renovateNote("rebase via Renovate"),
+	}
+}
+
+// renovateNote notes text on the PRs Renovate manages.
+func renovateNote(text string) func(github.PR) string {
+	return func(pr github.PR) string {
+		if pr.Renovate() {
+			return text
+		}
+
+		return ""
+	}
+}
 
 // recordQuery appends query to the history file. It's a command so the file
 // write stays out of Update; a failure is dropped, since history must never

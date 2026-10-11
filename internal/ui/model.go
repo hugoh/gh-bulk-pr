@@ -42,6 +42,7 @@ type pendingAction struct {
 	onDone      func(pr *github.PR)       // optional: brings a succeeded PR's local copy up to date
 	closes      func(pr github.PR) bool   // optional: whether succeeding on pr merges or closes it
 	note        func(pr github.PR) string // optional: what this action does to pr, when it isn't obvious
+	warns       bool                      // a note is a warning: a PR with one makes the action destructive
 }
 
 // Model is the bubbletea model driving the PR list, preview panel, filter

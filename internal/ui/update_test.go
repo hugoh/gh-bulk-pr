@@ -1950,3 +1950,68 @@ func TestApplyOnDone_KeepsStoredDetailsInStep(t *testing.T) {
 
 	assert.True(t, m.prs[0].AutoMerge, "a later refresh of the rows doesn't undo the toggle")
 }
+
+const renovateTestBody = "Update foo.\n\n" +
+	" - [ ] <!-- rebase-check -->If you want to rebase/retry this PR, check this box\n"
+
+func TestStartAction_UpdateBranch(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		key             string
+		renovate        bool
+		wantLabel       string
+		wantNote        string
+		wantDestructive bool
+	}{
+		{"u", false, "update branch", "", false},
+		{"u", true, "update branch", "rebase via Renovate", false},
+		{"U", false, "update branch (GitHub)", "", false},
+		{"U", true, "update branch (GitHub)", "Renovate stops updating this PR", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("%s renovate=%v", tt.key, tt.renovate), func(t *testing.T) {
+			t.Parallel()
+
+			m := loadedModel()
+			if tt.renovate {
+				m.prs[0].Body = renovateTestBody
+			}
+
+			m, _ = m.handleListKeyByString(tt.key)
+
+			require.Equal(t, screenConfirm, m.screen)
+			assert.Equal(t, tt.wantLabel, m.action.label)
+			assert.Equal(t, tt.wantNote, m.action.note(m.prs[0]))
+			assert.Equal(t, tt.wantDestructive, m.action.destructive)
+		})
+	}
+}
+
+func TestStartAction_UpdateNeedsLoadedDetails(t *testing.T) {
+	t.Parallel()
+
+	for _, key := range []string{"u", "U"} {
+		m := loadedModel()
+		m.prs[0].Detailed = false
+
+		m, _ = m.handleListKeyByString(key)
+
+		assert.Equal(t, screenList, m.screen, key)
+		assert.NotEmpty(t, m.notice, "whether it is a Renovate PR isn't known yet")
+	}
+}
+
+func TestRowsFor_MarksRequestedRebases(t *testing.T) {
+	t.Parallel()
+
+	requested := github.PR{
+		ID: "a", Number: 1, Detailed: true, Checks: github.ChecksPass,
+		Body: strings.Replace(renovateTestBody, "[ ]", "[x]", 1),
+	}
+
+	rows := rowsFor([]github.PR{requested}, map[prKey]bool{}, map[string]fetchState{})
+
+	assert.Equal(t, refreshingMark, rows[0][0])
+}

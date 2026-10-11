@@ -52,6 +52,7 @@ Press `?` in the app for this list.
 | `m` | merge |
 | `a` | auto |
 | `u` | update |
+| `U` | update on GitHub |
 | `?` | help |
 | `q` | quit |
 

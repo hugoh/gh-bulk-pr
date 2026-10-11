@@ -3,10 +3,12 @@ package github
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -520,4 +522,82 @@ func TestPR_Waiting(t *testing.T) {
 			assert.Equal(t, tt.want, tt.pr.Waiting())
 		})
 	}
+}
+
+const renovateBody = "Update foo.\n\n - [ ] <!-- rebase-check -->If you want to rebase/retry this PR, check this box\n"
+
+// prBody is the JSON a PR's body is read and written as.
+type prBody struct {
+	Body string `json:"body"`
+}
+
+func TestRequestRebase(t *testing.T) {
+	t.Parallel()
+
+	ticked := strings.Replace(renovateBody, "[ ]", "[x]", 1)
+
+	tests := map[string]struct {
+		current string
+		want    string // the body written back, "" when nothing is
+		wantErr bool
+	}{
+		"ticks the box":     {current: renovateBody, want: ticked},
+		"already requested": {current: ticked},
+		"not a renovate pr": {current: "Plain PR.", wantErr: true},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var written prBody
+
+			rest := newTestRESTClient(t, func(r *http.Request) (*http.Response, error) {
+				assert.Equal(t, "/repos/hugoh/gh-bulk-pr/pulls/7", r.URL.Path)
+
+				if r.Method == http.MethodPatch {
+					if err := json.NewDecoder(r.Body).Decode(&written); err != nil {
+						return nil, fmt.Errorf("decode patch: %w", err)
+					}
+
+					return jsonResponse("{}"), nil
+				}
+
+				current, err := json.Marshal(prBody{Body: tt.current})
+				if err != nil {
+					return nil, fmt.Errorf("encode pr: %w", err)
+				}
+
+				return jsonResponse(string(current)), nil
+			})
+
+			err := (&Client{rest: rest}).RequestRebase(
+				context.Background(),
+				PR{Repo: testRepo, Number: 7},
+			)
+			if tt.wantErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+
+			assert.Equal(t, tt.want, written.Body)
+		})
+	}
+}
+
+func TestPR_Renovate(t *testing.T) {
+	t.Parallel()
+
+	ticked := strings.Replace(renovateBody, "[ ]", "[x]", 1)
+
+	assert.True(t, PR{Body: renovateBody}.Renovate())
+	assert.False(t, PR{Body: renovateBody}.RebaseRequested())
+	assert.True(t, PR{Body: ticked}.RebaseRequested())
+	assert.False(t, PR{Body: "Plain PR."}.Renovate())
+	assert.True(
+		t,
+		PR{Detailed: true, Checks: ChecksPass, Body: ticked}.Waiting(),
+		"it waits on Renovate",
+	)
 }
