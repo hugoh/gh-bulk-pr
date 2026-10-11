@@ -21,59 +21,31 @@ type prBody struct {
 	Body string `json:"body"`
 }
 
-func TestRequestRebase(t *testing.T) {
+func TestRequestRebase_AddsRenovatesRebaseLabel(t *testing.T) {
 	t.Parallel()
 
-	ticked := strings.Replace(renovateBody, "[ ]", "[x]", 1)
+	var (
+		gotMethod, gotPath string
+		labels             struct {
+			Labels []string `json:"labels"`
+		}
+	)
 
-	tests := map[string]struct {
-		current string
-		want    string // the body written back, "" when nothing is
-		wantErr bool
-	}{
-		"ticks the box":     {current: renovateBody, want: ticked},
-		"already requested": {current: ticked},
-		"not a renovate pr": {current: plainBody, wantErr: true},
-	}
+	rest := newTestRESTClient(t, func(r *http.Request) (*http.Response, error) {
+		gotMethod, gotPath = r.Method, r.URL.Path
+		if err := json.NewDecoder(r.Body).Decode(&labels); err != nil {
+			return nil, fmt.Errorf("decode labels: %w", err)
+		}
 
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
+		return jsonResponse("[]"), nil
+	})
 
-			var written prBody
+	pr := PR{Repo: testRepo, Number: 7, Author: renovateLogin}
+	require.NoError(t, (&Client{rest: rest}).RequestRebase(context.Background(), pr))
 
-			rest := newTestRESTClient(t, func(r *http.Request) (*http.Response, error) {
-				assert.Equal(t, "/repos/hugoh/gh-bulk-pr/pulls/7", r.URL.Path)
-
-				if r.Method == http.MethodPatch {
-					if err := json.NewDecoder(r.Body).Decode(&written); err != nil {
-						return nil, fmt.Errorf("decode patch: %w", err)
-					}
-
-					return jsonResponse("{}"), nil
-				}
-
-				current, err := json.Marshal(prBody{Body: tt.current})
-				if err != nil {
-					return nil, fmt.Errorf("encode pr: %w", err)
-				}
-
-				return jsonResponse(string(current)), nil
-			})
-
-			err := (&Client{rest: rest}).RequestRebase(
-				context.Background(),
-				PR{Repo: testRepo, Number: 7},
-			)
-			if tt.wantErr {
-				require.Error(t, err)
-			} else {
-				require.NoError(t, err)
-			}
-
-			assert.Equal(t, tt.want, written.Body)
-		})
-	}
+	assert.Equal(t, http.MethodPost, gotMethod, "one call: the body is never read or written")
+	assert.Equal(t, "/repos/hugoh/gh-bulk-pr/issues/7/labels", gotPath)
+	assert.Equal(t, []string{rebaseLabel}, labels.Labels)
 }
 
 func TestPR_Renovate(t *testing.T) {
@@ -84,6 +56,11 @@ func TestPR_Renovate(t *testing.T) {
 	assert.True(t, PR{Body: renovateBody}.Renovate())
 	assert.False(t, PR{Body: renovateBody}.RebaseRequested())
 	assert.True(t, PR{Body: ticked}.RebaseRequested())
+	assert.True(
+		t,
+		PR{Labels: []string{"deps", rebaseLabel}}.RebaseRequested(),
+		"Renovate's rebase label",
+	)
 	assert.False(t, PR{Body: plainBody}.Renovate())
 	assert.True(
 		t,
@@ -119,15 +96,25 @@ func TestRequestRebase_AsksDependabotInAComment(t *testing.T) {
 func TestPR_Bot(t *testing.T) {
 	t.Parallel()
 
+	const renovate = "Renovate"
+
 	tests := map[string]struct {
 		pr   PR
 		want string
 	}{
-		"renovate":          {PR{Author: "renovate", Body: renovateBody}, "Renovate"},
-		"self-hosted bot":   {PR{Author: "my-renovate", Body: renovateBody}, "Renovate"},
-		"dependabot":        {PR{Author: dependabotLogin}, "Dependabot"},
-		"dependabot (REST)": {PR{Author: "dependabot[bot]"}, "Dependabot"},
-		"person":            {PR{Author: "hugoh", Body: plainBody}, ""},
+		"renovate": {
+			PR{Author: renovateLogin, Body: renovateBody},
+			renovate,
+		},
+		"self-hosted bot": {
+			PR{Author: "my-renovate", Body: renovateBody},
+			renovate,
+		},
+		"renovate, body cut before the box": {PR{Author: renovateLogin, Body: plainBody}, renovate},
+		"renovate (REST)":                   {PR{Author: renovateLogin + "[bot]"}, renovate},
+		"dependabot":                        {PR{Author: dependabotLogin}, "Dependabot"},
+		"dependabot (REST)":                 {PR{Author: "dependabot[bot]"}, "Dependabot"},
+		"person":                            {PR{Author: "hugoh", Body: plainBody}, ""},
 	}
 
 	for name, tt := range tests {
