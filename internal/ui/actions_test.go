@@ -172,6 +172,20 @@ func TestHandleActionInputKey(t *testing.T) {
 		require.Len(t, m.confirm, 1)
 	})
 
+	t.Run("enter with a blank label stays on the input", func(t *testing.T) {
+		t.Parallel()
+
+		m := loadedModel()
+		m.screen = screenActionInput
+		m.actionKey = "l"
+		m.actionInput.SetValue("  ")
+
+		m, _ = m.handleActionInputKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+
+		require.Equal(t, screenActionInput, m.screen)
+		require.Nil(t, m.action)
+	})
+
 	t.Run("esc cancels back to the list", func(t *testing.T) {
 		t.Parallel()
 

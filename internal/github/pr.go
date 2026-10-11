@@ -2,6 +2,7 @@ package github
 
 import (
 	"cmp"
+	"slices"
 	"time"
 )
 
@@ -27,10 +28,12 @@ type PR struct {
 }
 
 // MergesNow reports whether toggling auto-merge on this PR merges it
-// outright: GitHub refuses auto-merge on a PR that is already clean, so there
-// is nothing to wait for.
+// outright: GitHub refuses auto-merge on a PR that can already merge (clean,
+// unstable or has hooks, as gh pr merge counts them), so there is nothing to
+// wait for.
 func (p PR) MergesNow() bool {
-	return !p.AutoMerge && p.MergeState == MergeClean
+	return !p.AutoMerge &&
+		slices.Contains([]string{MergeClean, "UNSTABLE", "HAS_HOOKS"}, p.MergeState)
 }
 
 // Waiting reports whether the PR's state can still change without anyone

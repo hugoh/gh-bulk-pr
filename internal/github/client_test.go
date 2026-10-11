@@ -180,7 +180,12 @@ const detailsResponseJSON = `{
         "commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": "ERROR"}}}]}
       }
     ]
-  }
+  },
+  "errors": [{
+    "type": "NOT_FOUND",
+    "path": ["nodes", 1],
+    "message": "Could not resolve to a node with the global id of 'PR_gone'"
+  }]
 }`
 
 func TestDetails(t *testing.T) {
@@ -212,6 +217,20 @@ func TestDetails(t *testing.T) {
 	assert.Equal(t, "DIRTY", details[1].MergeState)
 	assert.True(t, details[1].Closed, "a merged PR is closed")
 	assert.Equal(t, time.Date(2026, 10, 11, 15, 55, 34, 0, time.UTC), details[1].ClosedAt)
+}
+
+func TestDetails_OtherGraphQLErrorFails(t *testing.T) {
+	t.Parallel()
+
+	var sent string
+
+	gql := graphQLCapturing(t, &sent, `{
+  "data": {"nodes": [null]},
+  "errors": [{"type": "FORBIDDEN", "message": "Resource protected by organization SAML enforcement"}]
+}`)
+
+	_, err := (&Client{gql: gql}).Details(context.Background(), []string{testNodeID})
+	require.ErrorContains(t, err, "SAML")
 }
 
 func TestDetails_NoIDsSendsNothing(t *testing.T) {

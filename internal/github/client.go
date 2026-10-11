@@ -4,7 +4,9 @@ package github
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/cli/go-gh/v2/pkg/api"
@@ -242,7 +244,7 @@ func (c *Client) Details(ctx context.Context, ids []string) ([]Detail, error) {
 		detailsQuery,
 		map[string]any{"ids": ids},
 		&resp,
-	); err != nil {
+	); err != nil && !onlyNotFound(err) {
 		return nil, fmt.Errorf("pr details: %w", err)
 	}
 
@@ -255,6 +257,17 @@ func (c *Client) Details(ctx context.Context, ids []string) ([]Detail, error) {
 	}
 
 	return details, nil
+}
+
+// onlyNotFound reports whether err is GitHub saying some IDs no longer
+// resolve: their nodes come back null, the rest of the response is good.
+func onlyNotFound(err error) bool {
+	var gqlErr *api.GraphQLError
+
+	return errors.As(err, &gqlErr) && !slices.ContainsFunc(
+		gqlErr.Errors,
+		func(item api.GraphQLErrorItem) bool { return item.Type != "NOT_FOUND" },
+	)
 }
 
 func detailFromNode(node detailNode) Detail {

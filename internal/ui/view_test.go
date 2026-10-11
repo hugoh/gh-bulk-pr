@@ -245,11 +245,24 @@ func TestColorChecks_KeepsColorAndHighlightOnSelectedRow(t *testing.T) {
 	sel, _, _ := strings.Cut(tableStyles().Selected.Render("|"), "|")
 	require.NotEmpty(t, sel)
 
-	got := colorChecks("plain ✓\n" + sel + "row ✗ tail\x1b[0m")
+	got := colorChecks("CI  \n ✓  \n"+sel+" ✗  tail\x1b[0m", checksCols())
 
-	assert.Contains(t, got, "plain "+okStyle().Render("✓")+"\n")
-	assert.Contains(t, got, onCursor(errStyle()).Render("✗")+sel+" tail")
+	assert.Contains(t, got, " "+okStyle().Render("✓")+" ")
+	assert.Contains(t, got, onCursor(errStyle()).Render("✗")+sel)
 	assert.NotContains(t, got, okStyle().Render("✓")+sel)
+}
+
+func checksCols() []table.Column { return []table.Column{{Title: "CI", Width: colChecks}} }
+
+func TestColorChecks_LeavesGlyphsInTitlesAlone(t *testing.T) {
+	t.Parallel()
+
+	cols := []table.Column{{Title: "Title", Width: 6}, {Title: "CI", Width: colChecks}}
+
+	got := colorChecks("header\n fix ✓   ✗  ", cols)
+
+	require.Contains(t, got, " fix ✓ ", "the title's ✓ is not a check")
+	require.Contains(t, got, errStyle().Render("✗"))
 }
 
 func TestColorMerge_KeepsHighlightBehindTheCellOnSelectedRow(t *testing.T) {
@@ -511,6 +524,15 @@ func TestViewActionInput_ShowsCount(t *testing.T) {
 	m, _ = m.handleListKeyByString("l")
 
 	assert.Contains(t, m.View().Content, "Label for 2 PR(s):")
+}
+
+func TestViewActionInput_CountsFocusedPRWithNoSelection(t *testing.T) {
+	t.Parallel()
+
+	m := loadedModel()
+	m, _ = m.handleListKeyByString("l")
+
+	require.Contains(t, m.View().Content, "Label for 1 PR(s):")
 }
 
 func TestViewConfirm_RepeatsCountAtThePrompt(t *testing.T) {
@@ -1050,7 +1072,7 @@ func TestViewList_HeaderSeparatesTabsFromQuery(t *testing.T) {
 func TestColorChecks_ColorsPendingGlyph(t *testing.T) {
 	t.Parallel()
 
-	assert.Contains(t, colorChecks("row ●"), previewLabelStyle().Render("●"))
+	assert.Contains(t, colorChecks("CI  \n ●  ", checksCols()), previewLabelStyle().Render("●"))
 }
 
 func TestPreviewText_ListsWhatItWaitsOn(t *testing.T) {

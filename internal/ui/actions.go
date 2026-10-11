@@ -272,6 +272,10 @@ func (m Model) handleActionInputKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	switch msg.String() {
 	case keyEnter:
 		input := m.actionInput.Value()
+		if strings.TrimSpace(input) == "" {
+			return m, nil
+		}
+
 		m.actionInput.Blur()
 		m.action = actionsForKey(m.client, m.actionKey, input)
 

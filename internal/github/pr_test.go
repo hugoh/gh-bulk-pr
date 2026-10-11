@@ -36,7 +36,10 @@ func TestMergesNow(t *testing.T) {
 	}{
 		"clean":                 {PR{MergeState: "CLEAN"}, true},
 		"clean with auto-merge": {PR{MergeState: "CLEAN", AutoMerge: true}, false},
+		"unstable":              {PR{MergeState: "UNSTABLE"}, true},
+		"has hooks":             {PR{MergeState: "HAS_HOOKS"}, true},
 		"behind":                {PR{MergeState: "BEHIND"}, false},
+		"blocked":               {PR{MergeState: "BLOCKED"}, false},
 		"details not loaded":    {PR{}, false},
 	}
 
