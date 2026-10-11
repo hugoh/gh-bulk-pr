@@ -21,11 +21,13 @@ gh bulk-pr --query "is:open is:pr author:@me archived:false"
 Press `?` in the app for this list.
 
 {{ .KeysTable }}
-With nothing selected, `l`, `c`, `m`, `a`, `u` and `U` act on the PR under the cursor.
+With nothing selected, `l`, `c`, `m`, `a`, `v`, `u` and `U` act on the PR under the cursor.
 
-`a` toggles squash auto-merge on each selected PR: it enables it where it is off and disables it where it is on. PRs with auto-merge enabled show `on` in the Auto column. A PR that is already ready to merge has nothing to wait for (GitHub refuses auto-merge on it), so `a` squash-merges it right away; the confirm screen marks those PRs `merges now` and needs an explicit `y`. Repos with auto-merge turned off fail for the PRs that need it.
+`m` and `a` merge with squash where the repo allows it, and otherwise with a merge commit or a rebase, whichever the repo allows; the confirm screen notes `merges with a merge commit` or `merges by rebasing` on those PRs. `v` approves each selected PR.
 
-`u` merges the base branch into each selected PR, for PRs that show `behind` when the repo requires branches to be up to date. Pair it with `a` so they merge once checks pass. Renovate PRs are updated differently: see [Renovate-aware actions](#renovate-aware-actions).
+`a` toggles auto-merge on each selected PR: it enables it where it is off and disables it where it is on. PRs with auto-merge enabled show `on` in the Auto column. A PR that is already ready to merge has nothing to wait for (GitHub refuses auto-merge on it), so `a` merges it right away; the confirm screen marks those PRs `merges now` and needs an explicit `y`. Repos with auto-merge turned off fail for the PRs that need it.
+
+`u` merges the base branch into each selected PR, for PRs that show `behind` when the repo requires branches to be up to date. Pair it with `a` so they merge once checks pass. Renovate and Dependabot PRs are updated differently: see [Bot-aware actions](#bot-aware-actions).
 
 `ctrl+c` quits at once from any screen; `q` needs a second press while PRs are selected. `O` asks for confirmation above {{ .OpenAllConfirmAbove }} PRs and opens at most {{ .OpenAllMax }}.
 
@@ -39,13 +41,14 @@ PRs that can change by themselves are re-checked every `--refresh`: pending chec
 
 Every action asks for confirmation before running. Close and merge need an explicit `y`, as do `a` and `U` on the PRs they mark; the others also accept `enter`. `n` or `esc` cancels. The confirm and results lists scroll (`j`/`k`, `g`/`G`, page keys), and failed PRs are listed first in the results. The app needs a terminal of at least {{ .MinWidth }} columns by {{ .MinHeight }} rows.
 
-## Renovate-aware actions
+## Bot-aware actions
 
-A PR whose body has [Renovate](https://docs.renovatebot.com)'s rebase/retry checkbox is treated as Renovate's, once its details have loaded.
+Dependency bots stop updating a branch someone else has pushed to, and GitHub's update commit is authored by you. So for their PRs, some actions ask the bot instead. A PR is [Renovate](https://docs.renovatebot.com)'s when its body has Renovate's rebase/retry checkbox, which is known once its details have loaded, and [Dependabot](https://docs.github.com/code-security/dependabot)'s when Dependabot opened it.
 
-- `u` asks Renovate to rebase or retry the PR instead of updating it on GitHub: it ticks the checkbox, reading the body just before writing it back since Renovate rewrites it. GitHub's update commit is authored by you, and Renovate stops updating a branch someone else has pushed to. The confirm and results screens mark those PRs `rebase via Renovate`; other selected PRs get a normal update.
-- While the box stays ticked, the row shows `↻`, the preview says `rebase requested`, and the PR is re-checked until Renovate unticks it.
-- `U` updates on GitHub anyway. On a Renovate PR the confirm screen warns `Renovate stops updating this PR` and needs an explicit `y`; on other PRs it is the same as `u`.
+- `u` asks the bot to rebase the PR instead of updating it on GitHub. For Renovate it ticks the checkbox, reading the body just before writing it back since Renovate rewrites it; for Dependabot it comments `@dependabot rebase`. The confirm and results screens mark those PRs `rebase via Renovate` or `rebase via Dependabot`; other selected PRs get a normal update.
+- While Renovate's box stays ticked, the row shows `↻`, the preview says `rebase requested`, and the PR is re-checked until Renovate unticks it. Dependabot leaves no such mark, so its PRs show the rebase once their checks restart.
+- `U` updates on GitHub anyway. On a bot's PR the confirm screen warns `Renovate stops updating this PR` (or Dependabot) and needs an explicit `y`; on other PRs it is the same as `u`.
+- `c` notes what closing tells the bot: `Renovate ignores this update from now on`, `Dependabot skips this version from now on`.
 
 ## Development
 
