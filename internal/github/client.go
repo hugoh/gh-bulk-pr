@@ -3,91 +3,13 @@
 package github
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
-	"net/http"
+	"slices"
 	"time"
 
 	"github.com/cli/go-gh/v2/pkg/api"
-)
-
-// PR is the subset of pull request data the list and preview views need.
-type PR struct {
-	ID         string // GraphQL node ID, which the auto-merge mutations need
-	Number     int
-	UpdatedAt  time.Time
-	Title      string
-	Repo       string // "owner/name"
-	Author     string
-	Labels     []string
-	Reviewers  []string
-	Checks     string   // ChecksPass, ChecksFail, ChecksPending, or "" when there are none
-	Pending    []string // names of the checks still running or waiting, e.g. "renovate/stability-days"
-	AutoMerge  bool     // auto-merge is enabled: it merges once its requirements pass
-	MergeState string   // raw GraphQL mergeStateStatus, e.g. "CLEAN", "BEHIND"
-	Body       string
-	URL        string
-	Detailed   bool // false until Details has filled in checks, merge state, labels, reviewers and body
-}
-
-// MergesNow reports whether toggling auto-merge on this PR merges it
-// outright: GitHub refuses auto-merge on a PR that is already clean, so there
-// is nothing to wait for.
-func (p PR) MergesNow() bool {
-	return !p.AutoMerge && p.MergeState == MergeClean
-}
-
-// Waiting reports whether the PR's state can still change without anyone
-// acting on it: its checks are pending or GitHub hasn't worked out its merge
-// state yet.
-func (p PR) Waiting() bool {
-	return p.Detailed && (p.Checks == ChecksPending || p.MergeState == MergeUnknown)
-}
-
-// Detail is what SearchPage leaves out because GitHub computes it per PR and
-// it is slow: merge state, check rollup, labels, reviewers and body.
-type Detail struct {
-	ID         string
-	Body       string
-	MergeState string
-	Checks     string
-	Pending    []string
-	Labels     []string
-	Reviewers  []string
-}
-
-// WithDetail returns p with d's fields filled in and Detailed set.
-func (p PR) WithDetail(d Detail) PR {
-	p.Body, p.MergeState, p.Checks = d.Body, d.MergeState, d.Checks
-	p.Pending, p.Labels, p.Reviewers = d.Pending, d.Labels, d.Reviewers
-	p.Detailed = true
-
-	return p
-}
-
-// Page is one page of search results plus what's needed to fetch the next.
-type Page struct {
-	PRs       []PR
-	Total     int // every match GitHub reports, not just this page
-	EndCursor string
-	HasNext   bool
-}
-
-// MergeClean is mergeStateStatus for a PR with nothing left to wait for.
-const MergeClean = "CLEAN"
-
-// MergeUnknown is mergeStateStatus while GitHub is still computing it.
-const MergeUnknown = "UNKNOWN"
-
-// Check states reported in PR.Checks.
-const (
-	ChecksPass = "pass"
-	ChecksFail = "fail"
-	// ChecksPending is a rollup still waiting on something: a running job or a
-	// status like renovate/stability-days.
-	ChecksPending = "pending"
 )
 
 // Client talks to the GitHub API using the token gh auth login already set up.
@@ -124,7 +46,7 @@ query($q: String!, $count: Int!, $after: String) {
         updatedAt
         title
         url
-        repository { nameWithOwner }
+        repository { nameWithOwner squashMergeAllowed mergeCommitAllowed rebaseMergeAllowed }
         author { login }
         autoMergeRequest { enabledAt }
       }
@@ -139,6 +61,9 @@ query($ids: [ID!]!) {
   nodes(ids: $ids) {
     ... on PullRequest {
       id
+      state
+      closedAt
+      autoMergeRequest { enabledAt }
       body
       mergeStateStatus
       labels(first: 20) { nodes { name } }
@@ -178,8 +103,26 @@ type searchNode struct {
 	UpdatedAt        time.Time
 	Title            string
 	URL              string
-	Repository       struct{ NameWithOwner string }
-	Author           struct{ Login string }
+	Repository       struct {
+		NameWithOwner      string
+		SquashMergeAllowed bool
+		MergeCommitAllowed bool
+		RebaseMergeAllowed bool
+	}
+	Author struct{ Login string }
+}
+
+// mergeMethod is the method a PR in node's repo merges with: squash when the
+// repo allows it, else the first it does allow.
+func (node searchNode) mergeMethod() string {
+	switch repo := node.Repository; {
+	case !repo.SquashMergeAllowed && repo.MergeCommitAllowed:
+		return MergeCommit
+	case !repo.SquashMergeAllowed && repo.RebaseMergeAllowed:
+		return MergeRebase
+	}
+
+	return MergeSquash
 }
 
 type detailsResponse struct {
@@ -189,6 +132,9 @@ type detailsResponse struct {
 // detailNode's ID is empty when the ID no longer resolves to a PR.
 type detailNode struct {
 	ID               string
+	State            string
+	ClosedAt         time.Time
+	AutoMergeRequest *struct{ EnabledAt string }
 	Body             string
 	MergeStateStatus string
 	Labels           struct {
@@ -215,6 +161,8 @@ type detailNode struct {
 		}
 	}
 }
+
+func (n detailNode) closed() bool { return n.State == "MERGED" || n.State == "CLOSED" }
 
 // checkContext is a commit status (Context, State) or a check run (Name,
 // Status); the fields of the other kind stay empty.
@@ -271,14 +219,15 @@ func (c *Client) SearchPage(ctx context.Context, query, after string) (Page, err
 
 func prFromNode(node searchNode) PR {
 	return PR{
-		ID:        node.ID,
-		AutoMerge: node.AutoMergeRequest != nil,
-		Number:    node.Number,
-		UpdatedAt: node.UpdatedAt,
-		Title:     node.Title,
-		Repo:      node.Repository.NameWithOwner,
-		Author:    node.Author.Login,
-		URL:       node.URL,
+		ID:          node.ID,
+		AutoMerge:   node.AutoMergeRequest != nil,
+		MergeMethod: node.mergeMethod(),
+		Number:      node.Number,
+		UpdatedAt:   node.UpdatedAt,
+		Title:       node.Title,
+		Repo:        node.Repository.NameWithOwner,
+		Author:      node.Author.Login,
+		URL:         node.URL,
 	}
 }
 
@@ -295,7 +244,7 @@ func (c *Client) Details(ctx context.Context, ids []string) ([]Detail, error) {
 		detailsQuery,
 		map[string]any{"ids": ids},
 		&resp,
-	); err != nil {
+	); err != nil && !onlyNotFound(err) {
 		return nil, fmt.Errorf("pr details: %w", err)
 	}
 
@@ -310,8 +259,26 @@ func (c *Client) Details(ctx context.Context, ids []string) ([]Detail, error) {
 	return details, nil
 }
 
+// onlyNotFound reports whether err is GitHub saying some IDs no longer
+// resolve: their nodes come back null, the rest of the response is good.
+func onlyNotFound(err error) bool {
+	var gqlErr *api.GraphQLError
+
+	return errors.As(err, &gqlErr) && !slices.ContainsFunc(
+		gqlErr.Errors,
+		func(item api.GraphQLErrorItem) bool { return item.Type != "NOT_FOUND" },
+	)
+}
+
 func detailFromNode(node detailNode) Detail {
-	result := Detail{ID: node.ID, Body: node.Body, MergeState: node.MergeStateStatus}
+	result := Detail{
+		ID:         node.ID,
+		Closed:     node.closed(),
+		ClosedAt:   node.ClosedAt,
+		AutoMerge:  node.AutoMergeRequest != nil,
+		Body:       node.Body,
+		MergeState: node.MergeStateStatus,
+	}
 	for _, label := range node.Labels.Nodes {
 		result.Labels = append(result.Labels, label.Name)
 	}
@@ -345,76 +312,4 @@ func detailFromNode(node detailNode) Detail {
 	}
 
 	return result
-}
-
-// AddLabel adds a label to a PR (issues and PRs share the same labels endpoint).
-func (c *Client) AddLabel(ctx context.Context, pr PR, label string) error {
-	return c.do(ctx, "add label", http.MethodPost,
-		fmt.Sprintf("repos/%s/issues/%d/labels", pr.Repo, pr.Number),
-		map[string][]string{"labels": {label}})
-}
-
-// ClosePR closes a PR without merging it.
-func (c *Client) ClosePR(ctx context.Context, pr PR) error {
-	return c.do(ctx, "close pr", http.MethodPatch,
-		fmt.Sprintf("repos/%s/pulls/%d", pr.Repo, pr.Number),
-		map[string]string{"state": "closed"})
-}
-
-// MergePR merges a PR using the squash strategy.
-func (c *Client) MergePR(ctx context.Context, pr PR) error {
-	return c.do(ctx, "merge pr", http.MethodPut,
-		fmt.Sprintf("repos/%s/pulls/%d/merge", pr.Repo, pr.Number),
-		map[string]string{"merge_method": "squash"})
-}
-
-// UpdateBranch merges the base branch into a PR that is behind it.
-func (c *Client) UpdateBranch(ctx context.Context, pr PR) error {
-	return c.do(ctx, "update branch", http.MethodPut,
-		fmt.Sprintf("repos/%s/pulls/%d/update-branch", pr.Repo, pr.Number),
-		struct{}{})
-}
-
-const (
-	enableAutoMergeMutation = `
-mutation($id: ID!) {
-  enablePullRequestAutoMerge(input: {pullRequestId: $id, mergeMethod: SQUASH}) { clientMutationId }
-}`
-	disableAutoMergeMutation = `
-mutation($id: ID!) {
-  disablePullRequestAutoMerge(input: {pullRequestId: $id}) { clientMutationId }
-}`
-)
-
-// ToggleAutoMerge turns auto-merge (squash) off for a PR that has it on, and
-// on for one that doesn't. A PR that is already clean has nothing to wait
-// for, so it is squash-merged instead (see PR.MergesNow).
-func (c *Client) ToggleAutoMerge(ctx context.Context, pull PR) error {
-	if pull.MergesNow() {
-		return c.MergePR(ctx, pull)
-	}
-
-	mutation := enableAutoMergeMutation
-	if pull.AutoMerge {
-		mutation = disableAutoMergeMutation
-	}
-
-	if err := c.gql.DoWithContext(ctx, mutation, map[string]any{"id": pull.ID}, nil); err != nil {
-		return fmt.Errorf("toggle auto-merge: %w", err)
-	}
-
-	return nil
-}
-
-func (c *Client) do(ctx context.Context, what, method, path string, body any) error {
-	payload, err := json.Marshal(body)
-	if err != nil {
-		return fmt.Errorf("%s: %w", what, err)
-	}
-
-	if err := c.rest.DoWithContext(ctx, method, path, bytes.NewReader(payload), nil); err != nil {
-		return fmt.Errorf("%s: %w", what, err)
-	}
-
-	return nil
 }

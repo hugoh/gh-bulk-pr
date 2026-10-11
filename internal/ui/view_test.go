@@ -245,11 +245,24 @@ func TestColorChecks_KeepsColorAndHighlightOnSelectedRow(t *testing.T) {
 	sel, _, _ := strings.Cut(tableStyles().Selected.Render("|"), "|")
 	require.NotEmpty(t, sel)
 
-	got := colorChecks("plain ✓\n" + sel + "row ✗ tail\x1b[0m")
+	got := colorChecks("CI  \n ✓  \n"+sel+" ✗  tail\x1b[0m", checksCols())
 
-	assert.Contains(t, got, "plain "+okStyle().Render("✓")+"\n")
-	assert.Contains(t, got, onCursor(errStyle()).Render("✗")+sel+" tail")
+	assert.Contains(t, got, " "+okStyle().Render("✓")+" ")
+	assert.Contains(t, got, onCursor(errStyle()).Render("✗")+sel)
 	assert.NotContains(t, got, okStyle().Render("✓")+sel)
+}
+
+func checksCols() []table.Column { return []table.Column{{Title: "CI", Width: colChecks}} }
+
+func TestColorChecks_LeavesGlyphsInTitlesAlone(t *testing.T) {
+	t.Parallel()
+
+	cols := []table.Column{{Title: "Title", Width: 6}, {Title: "CI", Width: colChecks}}
+
+	got := colorChecks("header\n fix ✓   ✗  ", cols)
+
+	require.Contains(t, got, " fix ✓ ", "the title's ✓ is not a check")
+	require.Contains(t, got, errStyle().Render("✗"))
 }
 
 func TestColorMerge_KeepsHighlightBehindTheCellOnSelectedRow(t *testing.T) {
@@ -511,6 +524,15 @@ func TestViewActionInput_ShowsCount(t *testing.T) {
 	m, _ = m.handleListKeyByString("l")
 
 	assert.Contains(t, m.View().Content, "Label for 2 PR(s):")
+}
+
+func TestViewActionInput_CountsFocusedPRWithNoSelection(t *testing.T) {
+	t.Parallel()
+
+	m := loadedModel()
+	m, _ = m.handleListKeyByString("l")
+
+	require.Contains(t, m.View().Content, "Label for 1 PR(s):")
 }
 
 func TestViewConfirm_RepeatsCountAtThePrompt(t *testing.T) {
@@ -1050,7 +1072,7 @@ func TestViewList_HeaderSeparatesTabsFromQuery(t *testing.T) {
 func TestColorChecks_ColorsPendingGlyph(t *testing.T) {
 	t.Parallel()
 
-	assert.Contains(t, colorChecks("row ●"), previewLabelStyle().Render("●"))
+	assert.Contains(t, colorChecks("CI  \n ●  ", checksCols()), previewLabelStyle().Render("●"))
 }
 
 func TestPreviewText_ListsWhatItWaitsOn(t *testing.T) {
@@ -1079,32 +1101,10 @@ func TestPendingSummary(t *testing.T) {
 	assert.Empty(t, pendingSummary(prs[2:]))
 }
 
-func TestLeavingResultsKeepsRowsExceptSucceeded(t *testing.T) {
-	t.Parallel()
-
-	m := loadedModel()
-	require.GreaterOrEqual(t, len(m.prs), 2)
-
-	done, failed := m.prs[0], m.prs[1]
-	m.screen = screenResults
-	m.total = 10
-	m.results = []worker.Result{{PR: done}, {PR: failed, Err: errors.New("boom")}}
-
-	m, cmd := m.handleResultsKey(keyMsgFromString("enter"))
-
-	assert.NotNil(t, cmd, "a fresh search starts")
-	assert.True(t, m.loading)
-	assert.Equal(t, screenList, m.screen)
-	assert.NotContains(t, m.prs, done)
-	assert.Contains(t, m.prs, failed)
-	assert.Len(t, m.prs, len(testPRs())-1)
-	assert.Equal(t, 9, m.total, "the total drops with the removed rows while reloading")
-}
-
 func TestViewAfterLeavingResultsShowsRefreshingAndReducedTotal(t *testing.T) {
 	t.Parallel()
 
-	m := loadedModel()
+	m := afterAction("m")
 	m.total = 10
 	m.screen = screenResults
 	succeeded, failed := m.prs[0], m.prs[1]
@@ -1118,4 +1118,36 @@ func TestViewAfterLeavingResultsShowsRefreshingAndReducedTotal(t *testing.T) {
 	assert.Contains(t, view, "refreshing…")
 	assert.Contains(t, view, "of 9")
 	assert.NotContains(t, view, "of 10")
+}
+
+func TestResultsBody_ShowsNotesOfSucceededPRs(t *testing.T) {
+	t.Parallel()
+
+	m := afterAction("u")
+	m.prs[0].Body = renovateTestBody
+	m.prs[1].Body = renovateTestBody
+	m.results = []worker.Result{{PR: m.prs[0]}, {PR: m.prs[1], Err: errors.New("boom")}}
+
+	lines := strings.Split(ansi.Strip(m.resultsBody()), "\n")
+
+	assert.NotContains(
+		t,
+		lines[0],
+		"rebase via Renovate",
+		"the failure comes first, without the note",
+	)
+	assert.Contains(t, lines[1], "rebase via Renovate")
+}
+
+func TestPreview_ShowsRequestedRebase(t *testing.T) {
+	t.Parallel()
+
+	requested := github.PR{Body: strings.Replace(renovateTestBody, "[ ]", "[x]", 1)}
+
+	assert.Contains(t, ansi.Strip(previewText(requested, "")), "rebase requested")
+	assert.NotContains(
+		t,
+		ansi.Strip(previewText(github.PR{Body: renovateTestBody}, "")),
+		"rebase requested",
+	)
 }

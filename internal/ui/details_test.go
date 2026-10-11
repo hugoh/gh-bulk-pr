@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/hugoh/gh-bulk-pr/internal/github"
@@ -32,7 +33,7 @@ func detailModel(t *testing.T) Model {
 func detailModelSized(t *testing.T, height int) Model {
 	t.Helper()
 
-	m := New(nil, "q").handleResize(tea.WindowSizeMsg{Width: 100, Height: height})
+	m := New(nil, "is:open q").handleResize(tea.WindowSizeMsg{Width: 100, Height: height})
 
 	return m.handleSearchDone(searchDoneMsg{
 		PRs:   manyPRs(1, 50, false),
@@ -144,9 +145,8 @@ func TestHandleDetailsDone_FillsRowsAndKeepsGoing(t *testing.T) {
 	m, _ = m.fetchDetails()
 
 	m, _ = m.handleDetailsDone(detailsDoneMsg{
-		searchID: m.searchID,
-		ids:      []string{idOf(1), idOf(2)},
-		details:  []github.Detail{detailFor(1)},
+		ids:     []string{idOf(1), idOf(2)},
+		details: []github.Detail{detailFor(1)},
 	})
 
 	assert.True(t, m.prs[0].Detailed)
@@ -172,9 +172,8 @@ func TestHandleDetailsDone_FreedSlotPicksUpTheNextRows(t *testing.T) {
 	require.Equal(t, fetchNone, m.fetched[idOf(detailConcurrency*detailBatchSize+1)])
 
 	m, cmd := m.handleDetailsDone(detailsDoneMsg{
-		searchID: m.searchID,
-		ids:      []string{idOf(1)},
-		details:  []github.Detail{detailFor(1), detailFor(2)},
+		ids:     []string{idOf(1)},
+		details: []github.Detail{detailFor(1), detailFor(2)},
 	})
 
 	assert.NotNil(t, cmd)
@@ -190,9 +189,8 @@ func TestHandleDetailsDone_FailureLeavesRowsRetryable(t *testing.T) {
 
 	failed := []string{idOf(1), idOf(2)}
 	m, cmd := m.handleDetailsDone(detailsDoneMsg{
-		searchID: m.searchID,
-		ids:      failed,
-		err:      errors.New("502"),
+		ids: failed,
+		err: errors.New("502"),
 	})
 
 	assert.Nil(t, cmd, "a failure does not retry by itself")
@@ -207,23 +205,23 @@ func TestHandleDetailsDone_FailureLeavesRowsRetryable(t *testing.T) {
 	assert.Equal(t, fetchInflight, m.fetched[idOf(1)], "moving retries the failed rows")
 }
 
-func TestHandleDetailsDone_IgnoresAnAbandonedSearch(t *testing.T) {
+func TestHandleDetailsDone_OutlivesAReload(t *testing.T) {
 	t.Parallel()
 
 	m := detailModel(t)
 	m, _ = m.fetchDetails()
-	stale := m.searchID
 
 	m, _ = m.reload()
-	m, cmd := m.handleDetailsDone(detailsDoneMsg{
-		searchID: stale,
-		ids:      []string{idOf(1)},
-		details:  []github.Detail{detailFor(1)},
+	assert.Equal(t, detailConcurrency, m.fetching, "a reload doesn't abandon details in flight")
+	assert.Equal(t, fetchInflight, m.fetched[idOf(1)])
+
+	m, _ = m.handleDetailsDone(detailsDoneMsg{
+		ids:     []string{idOf(1)},
+		details: []github.Detail{detailFor(1)},
 	})
 
-	assert.Nil(t, cmd)
-	assert.False(t, m.prs[0].Detailed)
-	assert.Zero(t, m.fetching, "the reload already forgot those requests")
+	assert.True(t, m.prs[0].Detailed)
+	assert.Equal(t, detailConcurrency-1, m.fetching)
 }
 
 func TestReload_KeepsKnownDetailsButFetchesThemAgain(t *testing.T) {
@@ -232,13 +230,12 @@ func TestReload_KeepsKnownDetailsButFetchesThemAgain(t *testing.T) {
 	m := detailModel(t)
 	m, _ = m.fetchDetails()
 	m, _ = m.handleDetailsDone(detailsDoneMsg{
-		searchID: m.searchID,
-		ids:      []string{idOf(1)},
-		details:  []github.Detail{detailFor(1)},
+		ids:     []string{idOf(1)},
+		details: []github.Detail{detailFor(1)},
 	})
 
 	m, _ = m.reload()
-	assert.Zero(t, countState(m, fetchDone)+countState(m, fetchInflight), "a refresh starts over")
+	assert.Zero(t, countState(m, fetchDone), "a refresh fetches known details again")
 
 	m = m.handleSearchDone(searchDoneMsg{
 		PRs: manyPRs(1, 50, false),
@@ -267,9 +264,8 @@ func TestUpdate_RoutesDetailsDone(t *testing.T) {
 	m, _ = m.fetchDetails()
 
 	updated, _ := m.Update(detailsDoneMsg{
-		searchID: m.searchID,
-		ids:      []string{idOf(1)},
-		details:  []github.Detail{detailFor(1)},
+		ids:     []string{idOf(1)},
+		details: []github.Detail{detailFor(1)},
 	})
 
 	assert.True(t, asModel(t, updated).prs[0].Detailed)
@@ -303,4 +299,101 @@ func TestAppendNew(t *testing.T) {
 	assert.Len(t, got, 5, "the page shifted by one, so PR 3 is not listed twice")
 	assert.Equal(t, 5, got[4].Number)
 	assert.Len(t, have, 3, "the input may be shared with the cache")
+}
+
+func TestHandleDetailsDone_DropsClosedPRs(t *testing.T) {
+	t.Parallel()
+
+	m := detailModel(t)
+	m.total = 50
+	m.selected[keyOf(m.prs[0])] = true
+	closed := detailFor(1)
+	closed.Closed = true
+
+	m, _ = m.fetchIDs([]string{idOf(1), idOf(2)})
+	m, _ = m.handleDetailsDone(detailsDoneMsg{
+		ids:     []string{idOf(1), idOf(2)},
+		details: []github.Detail{closed, detailFor(2)},
+	})
+
+	require.Len(t, m.prs, 49)
+	assert.Equal(t, idOf(2), m.prs[0].ID)
+	assert.Equal(t, 49, m.total)
+	assert.Empty(t, m.selected, "a closed PR can't stay selected")
+}
+
+func TestHandleSearchDone_KeepsKnownClosedPRsOut(t *testing.T) {
+	t.Parallel()
+
+	m := detailModel(t)
+	m.details[idOf(1)] = github.Detail{ID: idOf(1), Closed: true}
+
+	m = m.handleSearchDone(searchDoneMsg{
+		PRs: manyPRs(1, 50, false), Total: 60, HasNext: true,
+		id:    m.searchID,
+		query: "q",
+	})
+
+	require.Len(t, m.prs, 49, "the search index still lists it")
+	assert.Equal(t, 59, m.total)
+
+	m = m.handleSearchDone(searchDoneMsg{
+		PRs: manyPRs(51, 10, false), Total: 60,
+		id:    m.searchID,
+		query: "q",
+		more:  true,
+	})
+
+	assert.Len(t, m.prs, 59)
+	assert.Equal(t, 59, m.total, "the hidden PR stays out of the total on later pages")
+}
+
+func TestWithStoredDetails_ShowsPRsReopenedSinceTheyClosed(t *testing.T) {
+	t.Parallel()
+
+	closedAt := time.Date(2026, 10, 11, 12, 0, 0, 0, time.UTC)
+
+	tests := []struct {
+		name      string
+		updatedAt time.Time
+		shown     bool
+	}{
+		{"stale index entry from before the close", closedAt.Add(-time.Hour), false},
+		{"updated by the close itself", closedAt.Add(time.Second), false},
+		{"updated well after the close", closedAt.Add(time.Hour), true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			m := detailModel(t)
+			m.details[idOf(1)] = github.Detail{ID: idOf(1), Closed: true, ClosedAt: closedAt}
+			prs := manyPRs(1, 50, false)
+			prs[0].UpdatedAt = tt.updatedAt
+
+			m = m.handleSearchDone(searchDoneMsg{PRs: prs, Total: 50, id: m.searchID, query: "q"})
+
+			assert.Equal(t, tt.shown, m.prs[0].ID == idOf(1))
+
+			if tt.shown {
+				assert.False(t, m.prs[0].Detailed, "its details are fetched again")
+				assert.Contains(t, m.wantedDetails(), idOf(1))
+			}
+		})
+	}
+}
+
+func TestWithStoredDetails_ShowsClosedPRsWhenTheQueryAsksForThem(t *testing.T) {
+	t.Parallel()
+
+	m := New(nil, "is:closed is:pr").handleResize(tea.WindowSizeMsg{Width: 100, Height: 30})
+	m.details[idOf(1)] = github.Detail{ID: idOf(1), Closed: true, MergeState: github.MergeUnknown}
+
+	m = m.handleSearchDone(searchDoneMsg{PRs: manyPRs(1, 2, false), Total: 2, query: m.query})
+
+	require.Len(t, m.prs, 2)
+	assert.Equal(t, 2, m.total)
+	assert.False(t, m.prs[0].Waiting(), "a closed PR waits on nothing")
+	assert.NotEqual(t, refreshingMark, m.table.Rows()[0][0])
 }

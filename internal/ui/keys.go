@@ -9,7 +9,7 @@ type keyMap struct {
 	Move, Up, Down, Top, Bottom, PageUp, PageDown                    key.Binding
 	Select, SelectAll, Clear, Preview                                key.Binding
 	Filter, State, Author, Tab, Refresh, Checks, Open, OpenAll, Copy key.Binding
-	Label, Close, Merge, AutoMerge, Update                           key.Binding
+	Label, Close, Merge, AutoMerge, Approve, Update, UpdateGitHub    key.Binding
 	Help, Quit                                                       key.Binding
 }
 
@@ -19,33 +19,35 @@ func binding(helpKey, desc string, keys ...string) key.Binding {
 
 func newKeyMap() keyMap {
 	return keyMap{
-		Move:      binding("j/k", "move", "up", "down", "j", "k"),
-		Up:        binding("↑/k", "up", "up", "k"),
-		Down:      binding("↓/j", "down", "down", "j"),
-		Top:       binding("g/home", "top", "g", "home"),
-		Bottom:    binding("G/end", "bottom", "G", "end"),
-		PageUp:    binding("pgup/b", "page up", "pgup", "b"),
-		PageDown:  binding("pgdn/f", "page down", "pgdown", "f"),
-		Select:    binding("x/space", "select", "x", "space"),
-		SelectAll: binding("ctrl+a", "select all", "ctrl+a"),
-		Clear:     binding("esc", "close/clear", keyEsc),
-		Preview:   binding("enter/p", "preview", keyEnter, "p"),
-		Filter:    binding("/", "filter", "/"),
-		State:     binding("s", "open/closed", "s"),
-		Author:    binding("A", "my PRs", "A"),
-		Tab:       binding("1/2", "tab", "1", "2"),
-		Refresh:   binding("r", "refresh", "r"),
-		Checks:    binding("T", "checks", "T"),
-		Open:      binding("o", "open", "o"),
-		OpenAll:   binding("O", "open all", "O"),
-		Copy:      binding("y", "copy url", "y"),
-		Label:     binding("l", "label", "l"),
-		Close:     binding("c", "close", "c"),
-		Merge:     binding("m", "merge", "m"),
-		AutoMerge: binding("a", "auto", "a"),
-		Update:    binding("u", "update", "u"),
-		Help:      binding("?", "help", "?"),
-		Quit:      binding("q", "quit", "q"),
+		Move:         binding("j/k", "move", "up", "down", "j", "k"),
+		Up:           binding("↑/k", "up", "up", "k"),
+		Down:         binding("↓/j", "down", "down", "j"),
+		Top:          binding("g/home", "top", "g", "home"),
+		Bottom:       binding("G/end", "bottom", "G", "end"),
+		PageUp:       binding("pgup/b", "page up", "pgup", "b"),
+		PageDown:     binding("pgdn/f", "page down", "pgdown", "f"),
+		Select:       binding("x/space", "select", "x", "space"),
+		SelectAll:    binding("ctrl+a", "select all", "ctrl+a"),
+		Clear:        binding("esc", "close/clear", keyEsc),
+		Preview:      binding("enter/p", "preview", keyEnter, "p"),
+		Filter:       binding("/", "filter", "/"),
+		State:        binding("s", "open/closed", "s"),
+		Author:       binding("A", "my PRs", "A"),
+		Tab:          binding("1/2", "tab", "1", "2"),
+		Refresh:      binding("r", "refresh", "r"),
+		Checks:       binding("T", "checks", "T"),
+		Open:         binding("o", "open", "o"),
+		OpenAll:      binding("O", "open all", "O"),
+		Copy:         binding("y", "copy url", "y"),
+		Label:        binding("l", "label", "l"),
+		Close:        binding("c", "close", "c"),
+		Merge:        binding("m", "merge", "m"),
+		AutoMerge:    binding("a", "auto", "a"),
+		Approve:      binding("v", "approve", "v"),
+		Update:       binding("u", "update", "u"),
+		UpdateGitHub: binding("U", "update on GitHub", "U"),
+		Help:         binding("?", "help", "?"),
+		Quit:         binding("q", "quit", "q"),
 	}
 }
 
@@ -75,6 +77,16 @@ func (k keyMap) full() [][]key.Binding {
 			k.OpenAll,
 			k.Copy,
 		},
-		{k.Label, k.Close, k.Merge, k.AutoMerge, k.Update, k.Help, k.Quit},
+		{
+			k.Label,
+			k.Close,
+			k.Merge,
+			k.AutoMerge,
+			k.Approve,
+			k.Update,
+			k.UpdateGitHub,
+			k.Help,
+			k.Quit,
+		},
 	}
 }

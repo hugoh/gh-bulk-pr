@@ -2,6 +2,7 @@ package ui
 
 import (
 	"cmp"
+	"context"
 	"slices"
 	"time"
 
@@ -29,22 +30,21 @@ const (
 	fetchFailed
 )
 
-// detailsDoneMsg carries one details batch. searchID says which search it was
-// asked for: a reload abandons them.
+// detailsDoneMsg carries one details batch. Details belong to a PR, not to
+// the search that listed it, so a batch outlives a reload.
 type detailsDoneMsg struct {
-	searchID int
-	ids      []string
-	details  []github.Detail
-	err      error
+	ids     []string
+	details []github.Detail
+	err     error
 }
 
 func (m Model) detailsCmd(ids []string) tea.Cmd {
-	client, ctx, searchID := m.client, m.detailCtx, m.searchID
+	client := m.client
 
 	return func() tea.Msg {
-		details, err := client.Details(ctx, ids)
+		details, err := client.Details(context.Background(), ids)
 
-		return detailsDoneMsg{searchID: searchID, ids: ids, details: details, err: err}
+		return detailsDoneMsg{ids: ids, details: details, err: err}
 	}
 }
 
@@ -118,10 +118,6 @@ func (m Model) fetchIDs(ids []string) (Model, tea.Cmd) {
 }
 
 func (m Model) handleDetailsDone(msg detailsDoneMsg) (Model, tea.Cmd) {
-	if msg.searchID != m.searchID {
-		return m, nil
-	}
-
 	m.fetching--
 
 	if msg.err != nil {
@@ -131,11 +127,11 @@ func (m Model) handleDetailsDone(msg detailsDoneMsg) (Model, tea.Cmd) {
 
 		m.detailErr = msg.err
 
-		return m.backOff().scheduleRefresh()
+		return m.schedulePolls(msg.ids, nil, time.Now()).armPoll()
 	}
 
 	m.detailErr = nil
-	m = m.adjustInterval(msg.details)
+	changed := m.detailsChanged(msg.details)
 
 	for _, id := range msg.ids {
 		m.fetched[id] = fetchDone
@@ -147,44 +143,66 @@ func (m Model) handleDetailsDone(msg detailsDoneMsg) (Model, tea.Cmd) {
 
 	m.lastUpdated = time.Now()
 	m = m.withStoredDetails().refreshRows()
+	m = m.schedulePolls(msg.ids, changed, m.lastUpdated)
 
 	m, fetch := m.fetchDetails()
-	m, next := m.scheduleRefresh()
+	m, next := m.armPoll()
 
 	return m, tea.Batch(fetch, next)
 }
 
-// adjustInterval returns polling to its base rate when any detail differs from
-// the last known one, and slows it down when none does.
-func (m Model) adjustInterval(details []github.Detail) Model {
-	for _, detail := range details {
-		old, known := m.details[detail.ID]
-		if !known || old.Checks != detail.Checks || old.MergeState != detail.MergeState ||
-			!slices.Equal(old.Pending, detail.Pending) {
-			m.refreshInterval = m.refreshEvery
-
-			return m
-		}
-	}
-
-	return m.backOff()
-}
+// reopenSlack is how much later than its close a PR must have been updated to
+// count as reopened. Closing it updates it too, 1-2s later, and an action's
+// own close is stamped with the local clock.
+const reopenSlack = 10 * time.Second
 
 // withStoredDetails fills in every listed PR whose details are known, however
 // old, so a refresh doesn't blank the Checks and Merge columns while it loads.
-// m.prs may be shared with the cache, so it is copied, not edited.
+// When the query asks for open PRs, those known to be closed are dropped: the
+// search index lists them for a while after they close. One updated since it
+// closed was reopened, so its details are forgotten and fetched again. m.prs may be shared with the cache, so it
+// is copied, not edited.
 func (m Model) withStoredDetails() Model {
-	prs := slices.Clone(m.prs)
+	prs := make([]github.PR, 0, len(m.prs))
+	openOnly := isOpen(m.query)
 
-	for i, pr := range prs {
-		if detail, ok := m.details[pr.ID]; ok {
-			prs[i] = pr.WithDetail(detail)
+	for _, pull := range m.prs {
+		if openOnly && m.knownClosed(pull) {
+			delete(m.selected, keyOf(pull))
+			m.hidden++
+			m.total = max(m.total-1, 0)
+
+			continue
 		}
+
+		if detail, known := m.details[pull.ID]; known {
+			pull = pull.WithDetail(detail)
+		}
+
+		prs = append(prs, pull)
 	}
 
 	m.prs = prs
 
 	return m
+}
+
+// knownClosed reports whether pull was closed when last fetched and hasn't
+// been updated since. One that has was reopened: its details are forgotten.
+func (m Model) knownClosed(pull github.PR) bool {
+	detail, known := m.details[pull.ID]
+	if !known || !detail.Closed {
+		return false
+	}
+
+	if pull.UpdatedAt.After(detail.ClosedAt.Add(reopenSlack)) {
+		delete(m.details, pull.ID)
+		delete(m.fetched, pull.ID)
+
+		return false
+	}
+
+	return true
 }
 
 // followCursor is what moving the cursor sets off: the next page when it is

@@ -5,57 +5,15 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/cli/go-gh/v2/pkg/browser"
 	"github.com/hugoh/gh-bulk-pr/internal/github"
-	"github.com/hugoh/gh-bulk-pr/internal/worker"
 )
-
-const progressPollInterval = 150 * time.Millisecond
-
-// searchDoneMsg carries one page of search results. id and query say which
-// search it answers, and more marks a page after the first.
-type searchDoneMsg struct {
-	github.Page
-
-	id    int
-	query string
-	more  bool
-	err   error
-}
 
 // historyLoadedMsg delivers the past queries read for the filter bar.
 type historyLoadedMsg struct {
 	entries []string
-}
-
-type actionDoneMsg struct {
-	results []worker.Result
-}
-
-type actionProgressMsg struct{}
-
-// searchCmds fetches the first page of results. Its rows arrive without
-// details, which fetchDetails asks for as they land. It stops with ctx.
-func (m Model) searchCmds(ctx context.Context) tea.Cmd {
-	return tea.Batch(m.spinner.Tick, m.runSearch(ctx, "", false))
-}
-
-// moreCmds fetches the page after m.endCursor. It stops with ctx.
-func (m Model) moreCmds(ctx context.Context) tea.Cmd {
-	return tea.Batch(m.spinner.Tick, m.runSearch(ctx, m.endCursor, true))
-}
-
-func (m Model) runSearch(ctx context.Context, after string, more bool) tea.Cmd {
-	client, query, searchID := m.client, m.query, m.searchID
-
-	return func() tea.Msg {
-		page, err := client.SearchPage(ctx, query, after)
-
-		return searchDoneMsg{Page: page, id: searchID, query: query, more: more, err: err}
-	}
 }
 
 func enhanceCommand(pr github.PR) *exec.Cmd {
@@ -72,61 +30,6 @@ func (m Model) launchEnhance() tea.Cmd {
 	}
 
 	return tea.ExecProcess(enhanceCommand(pr), func(error) tea.Msg { return nil })
-}
-
-func (m Model) runAction() tea.Cmd {
-	action := m.action
-	prs := m.confirm
-	done := m.actionDone
-
-	return func() tea.Msg {
-		results := worker.Run(context.Background(), prs, action.run, done)
-
-		return actionDoneMsg{results: results}
-	}
-}
-
-// pollActionProgress re-renders the progress bar every tick while a bulk
-// action is running; Update stops rescheduling it once results land.
-func pollActionProgress() tea.Cmd {
-	return tea.Tick(progressPollInterval, func(time.Time) tea.Msg {
-		return actionProgressMsg{}
-	})
-}
-
-func actionsForKey(client *github.Client, actionKey, input string) *pendingAction {
-	switch actionKey {
-	case "l":
-		return &pendingAction{
-			label: fmt.Sprintf("add label %q", input),
-			run:   func(ctx context.Context, pr github.PR) error { return client.AddLabel(ctx, pr, input) },
-		}
-	case "c":
-		return &pendingAction{label: "close", destructive: true, run: client.ClosePR}
-	case "m":
-		return &pendingAction{label: "merge", destructive: true, run: client.MergePR}
-	case "u":
-		return &pendingAction{label: "update branch", run: client.UpdateBranch}
-	case "a":
-		return &pendingAction{
-			label: "toggle auto-merge",
-			run:   client.ToggleAutoMerge,
-			onDone: func(pr *github.PR) {
-				if !pr.MergesNow() {
-					pr.AutoMerge = !pr.AutoMerge
-				}
-			},
-			note: func(pr github.PR) string {
-				if pr.MergesNow() {
-					return "merges now"
-				}
-
-				return ""
-			},
-		}
-	}
-
-	return nil
 }
 
 // recordQuery appends query to the history file. It's a command so the file

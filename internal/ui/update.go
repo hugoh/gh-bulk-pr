@@ -1,18 +1,13 @@
 package ui
 
 import (
-	"context"
 	"fmt"
-	"slices"
-	"sync/atomic"
-	"time"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/table"
 	tea "charm.land/bubbletea/v2"
 	"github.com/hugoh/gh-bulk-pr/internal/github"
-	"github.com/hugoh/gh-bulk-pr/internal/worker"
 )
 
 const (
@@ -71,15 +66,6 @@ func (m Model) handleSpinnerTick(msg spinner.TickMsg) (Model, tea.Cmd) {
 	m.spinner, cmd = m.spinner.Update(msg)
 
 	return m, cmd
-}
-
-func (m Model) handleActionDone(msg actionDoneMsg) Model {
-	m.results = msg.results
-	m = m.applyOnDone(msg.results)
-	m.screen = screenResults
-	m.pane.GotoTop()
-
-	return m
 }
 
 // modelMsg is a message that only updates the model, with no command to run.
@@ -197,106 +183,6 @@ func (m Model) syncTableHeight() Model {
 	return m
 }
 
-// handleActionProgress re-renders the progress bar and keeps polling until
-// actionDoneMsg replaces the screen; it stops rescheduling once results land
-// or the model has moved off the results screen.
-func (m Model) handleActionProgress() (Model, tea.Cmd) {
-	if m.screen != screenResults || m.results != nil {
-		return m, nil
-	}
-
-	return m, pollActionProgress()
-}
-
-func (m Model) handleSearchDone(msg searchDoneMsg) Model {
-	if msg.id != m.searchID {
-		return m
-	}
-
-	if msg.more {
-		return m.handleMoreDone(msg)
-	}
-
-	m.loading = false
-	m.err = msg.err
-
-	if msg.err == nil {
-		m.prs = msg.PRs
-		m = m.withStoredDetails()
-		m.selected = survivingSelection(m.selected, m.prs)
-		m = m.storePaging(msg)
-		m = m.refreshRows()
-		m.lastUpdated = time.Now()
-	}
-
-	return m
-}
-
-func (m Model) handleMoreDone(msg searchDoneMsg) Model {
-	m.loadingMore = false
-
-	if m.cancelMore != nil {
-		m.cancelMore()
-		m.cancelMore = nil
-	}
-
-	if msg.err != nil {
-		m.moreErr = msg.err
-
-		return m
-	}
-
-	m.moreErr = nil
-	m.prs = appendNew(m.prs, msg.PRs)
-	m = m.withStoredDetails()
-	m = m.storePaging(msg)
-	m.lastUpdated = time.Now()
-
-	return m.refreshRows()
-}
-
-// storePaging records where the next page starts and caches everything
-// loaded so far for the current query.
-func (m Model) storePaging(msg searchDoneMsg) Model {
-	m.total, m.endCursor, m.hasMore = msg.Total, msg.EndCursor, msg.HasNext
-	m.cache[msg.query] = github.Page{
-		PRs:       m.prs,
-		Total:     m.total,
-		EndCursor: m.endCursor,
-		HasNext:   m.hasMore,
-	}
-
-	return m
-}
-
-// maybeLoadMore fetches the next page once the cursor is within
-// loadMoreMargin rows of the last loaded one. A failed page is retried by the
-// next cursor move.
-func (m Model) maybeLoadMore() (Model, tea.Cmd) {
-	if !m.hasMore || m.loading || m.loadingMore || m.table.Cursor() < len(m.prs)-loadMoreMargin {
-		return m, nil
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	m.cancelMore = cancel
-	m.loadingMore = true
-	m.moreErr = nil
-
-	return m, m.moreCmds(ctx)
-}
-
-func survivingSelection(selected map[prKey]bool, prs []github.PR) map[prKey]bool {
-	kept := map[prKey]bool{}
-
-	for _, pr := range prs {
-		if selected[keyOf(pr)] {
-			kept[keyOf(pr)] = true
-		}
-	}
-
-	return kept
-}
-
 func (m Model) handleKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	if msg.String() == keyCtrlC {
 		return m, tea.Quit
@@ -320,103 +206,6 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	}
 
 	return m, nil
-}
-
-func (m Model) handleResultsKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
-	if m.results == nil {
-		return m, nil // still running; only ctrl+c (handled in Update) leaves
-	}
-
-	if msg.String() == keyEnter || msg.String() == keyEsc {
-		m.screen = screenList
-		kept := withoutSucceeded(m.prs, m.results)
-		m.total = max(m.total-(len(m.prs)-len(kept)), 0)
-		m.prs = kept
-		m.selected = map[prKey]bool{}
-		delete(m.cache, m.query)
-		m = m.refreshRows()
-
-		return m.reload()
-	}
-
-	return m.scrollPane(msg, m.resultsBody()), nil
-}
-
-// withoutSucceeded drops the PRs an action just handled, so the list stays
-// populated while the reload runs without showing them in their old state.
-func withoutSucceeded(prs []github.PR, results []worker.Result) []github.PR {
-	done := map[prKey]bool{}
-
-	for _, r := range results {
-		if r.Err == nil {
-			done[keyOf(r.PR)] = true
-		}
-	}
-
-	return slices.DeleteFunc(slices.Clone(prs), func(pr github.PR) bool { return done[keyOf(pr)] })
-}
-
-// reload starts a fresh search for the current query, cancelling any still
-// running. Rows already on screen stay until the new result replaces them.
-func (m Model) reload() (Model, tea.Cmd) {
-	if m.cancel != nil {
-		m.cancel()
-	}
-
-	if m.cancelMore != nil {
-		m.cancelMore()
-		m.cancelMore = nil
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	m.cancel = cancel
-	m.detailCtx = ctx
-	m.fetched = map[string]fetchState{}
-	m.fetching = 0
-	m.detailErr = nil
-	m.refreshInterval = m.refreshEvery
-	m.searchID++
-	m.loading = true
-	m.loadingMore = false
-	m.moreErr = nil
-	m.err = nil
-
-	return m, m.searchCmds(ctx)
-}
-
-// refreshAll reloads the whole list and, without waiting for it, re-fetches
-// the details of the focused PR.
-func (m Model) refreshAll() (Model, tea.Cmd) {
-	m, search := m.reload()
-
-	pr, ok := m.focusedPR()
-	if !ok || pr.ID == "" {
-		return m, search
-	}
-
-	m, focused := m.fetchIDs([]string{pr.ID})
-
-	return m, tea.Batch(search, focused)
-}
-
-func (m Model) withResults(page github.Page) Model {
-	m.prs, m.total, m.endCursor, m.hasMore = page.PRs, page.Total, page.EndCursor, page.HasNext
-
-	return m.withStoredDetails()
-}
-
-// runQuery makes query current, selecting the tab it matches (if any),
-// records it in the history and reloads the list.
-func (m Model) runQuery(query string) (Model, tea.Cmd) {
-	m.query = query
-	m.tab = tabFor(query)
-
-	m = m.withResults(m.cache[query])
-	m.selected = map[prKey]bool{}
-	m = m.refreshRows()
-	m, search := m.reload()
-
-	return m, tea.Batch(m.recordQuery(query), search)
 }
 
 func (m Model) handleListKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
@@ -446,7 +235,7 @@ func (m Model) handleListKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	case key.Matches(
 		msg, keys.Checks, keys.Open, keys.OpenAll, keys.Copy, keys.State,
 		keys.Author, keys.Tab,
-		keys.Label, keys.Close, keys.Merge, keys.AutoMerge, keys.Update,
+		keys.Label, keys.Close, keys.Merge, keys.AutoMerge, keys.Approve, keys.Update, keys.UpdateGitHub,
 	):
 		return m.handleCommandKey(msg, openArmed)
 	}
@@ -613,39 +402,6 @@ func (m Model) selectAll() (Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) startAction(actionKey string) (Model, tea.Cmd) {
-	if len(m.targetPRs()) == 0 {
-		return m, nil
-	}
-
-	if actionKey == "l" {
-		m.actionKey = actionKey
-		m.screen = screenActionInput
-		m.actionInput.SetValue("")
-		m.actionInput.Focus()
-
-		return m, nil
-	}
-
-	if actionKey == "a" &&
-		slices.ContainsFunc(m.targetPRs(), func(pr github.PR) bool { return !pr.Detailed }) {
-		m.notice = "still loading PR details: try again in a moment"
-
-		return m, nil
-	}
-
-	m.action = actionsForKey(m.client, actionKey, "")
-	if m.action != nil && m.action.note != nil {
-		note := m.action.note
-		m.action.destructive = slices.ContainsFunc(
-			m.targetPRs(),
-			func(pr github.PR) bool { return note(pr) != "" },
-		)
-	}
-
-	return m.enterConfirm(), nil
-}
-
 func (m Model) handleFilterKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	switch msg.String() {
 	case keyEnter:
@@ -697,36 +453,6 @@ func (m Model) recallHistory(step int) Model {
 	return m
 }
 
-func (m Model) handleActionInputKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
-	switch msg.String() {
-	case keyEnter:
-		input := m.actionInput.Value()
-		m.actionInput.Blur()
-		m.action = actionsForKey(m.client, m.actionKey, input)
-
-		return m.enterConfirm(), nil
-	case keyEsc:
-		m.actionInput.Blur()
-		m.screen = screenList
-
-		return m, nil
-	}
-
-	var cmd tea.Cmd
-
-	m.actionInput, cmd = m.actionInput.Update(msg)
-
-	return m, cmd
-}
-
-func (m Model) enterConfirm() Model {
-	m.confirm = m.targetPRs()
-	m.screen = screenConfirm
-	m.pane.GotoTop()
-
-	return m
-}
-
 // scrollPane scrolls the confirm/results list for keys that aren't the
 // screen's own: j/k, arrows, page keys via the viewport, plus g/G for top and bottom.
 func (m Model) scrollPane(msg tea.Msg, body string) Model {
@@ -748,24 +474,6 @@ func (m Model) scrollPane(msg tea.Msg, body string) Model {
 	m.pane, _ = m.pane.Update(msg)
 
 	return m
-}
-
-func (m Model) handleConfirmKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
-	switch pressed := msg.String(); {
-	case pressed == "y" || (pressed == keyEnter && !m.action.destructive):
-		m.screen = screenResults
-		m.results = nil
-		m.actionDone = new(atomic.Int32)
-		m.actionTotal = len(m.confirm)
-
-		return m, tea.Batch(m.runAction(), pollActionProgress(), m.spinner.Tick)
-	case pressed == "n" || pressed == keyEsc:
-		m.screen = screenList
-
-		return m, nil
-	}
-
-	return m.scrollPane(msg, m.confirmBody()), nil
 }
 
 // prKey identifies a PR across repos; PR numbers alone collide.
@@ -817,27 +525,6 @@ func (m Model) refreshRows() Model {
 	return m
 }
 
-// applyOnDone runs the action's onDone on the local copy of every PR that
-// succeeded, so the table reflects the change without a reload.
-func (m Model) applyOnDone(results []worker.Result) Model {
-	if m.action == nil || m.action.onDone == nil {
-		return m
-	}
-
-	position := make(map[prKey]int, len(m.prs))
-	for idx, pull := range m.prs {
-		position[keyOf(pull)] = idx
-	}
-
-	for _, res := range results {
-		if idx, ok := position[keyOf(res.PR)]; ok && res.Err == nil {
-			m.action.onDone(&m.prs[idx])
-		}
-	}
-
-	return m.refreshRows()
-}
-
 // rowsFor builds the table rows; for PRs that aren't detailed yet, the checks
 // and merge cells are placeholders because the light search doesn't fetch them.
 // A detailed PR whose merge state GitHub hasn't worked out yet, or whose
@@ -849,7 +536,8 @@ func rowsFor(prs []github.PR, selected map[prKey]bool, fetched map[string]fetchS
 		mark := " "
 		if selected[keyOf(entry)] {
 			mark = "◆"
-		} else if entry.Detailed && (entry.MergeState == github.MergeUnknown || fetched[entry.ID] == fetchInflight) {
+		} else if entry.Detailed && !entry.Closed &&
+			(entry.MergeState == github.MergeUnknown || entry.RebaseRequested() || fetched[entry.ID] == fetchInflight) {
 			mark = refreshingMark
 		}
 

@@ -35,14 +35,6 @@ const (
 	screenHelp
 )
 
-type pendingAction struct {
-	label       string // human-readable name for the confirm/results screens
-	destructive bool   // hard to undo: only an explicit "y" confirms it, never enter
-	run         func(ctx context.Context, pr github.PR) error
-	onDone      func(pr *github.PR)       // optional: brings a succeeded PR's local copy up to date
-	note        func(pr github.PR) string // optional: what this action does to pr, when it isn't obvious
-}
-
 // Model is the bubbletea model driving the PR list, preview panel, filter
 // bar, and bulk-action flow.
 type Model struct {
@@ -62,7 +54,8 @@ type Model struct {
 	actionInput textinput.Model
 	prs         []github.PR
 	cache       map[string]github.Page // last full result per query
-	total       int                    // every match GitHub reports, loaded or not
+	total       int                    // every match GitHub reports, loaded or not, less the hidden ones
+	hidden      int                    // PRs the current search returned that are known closed, so left out
 	endCursor   string                 // where the next page starts
 	hasMore     bool
 	selected    map[prKey]bool
@@ -83,14 +76,13 @@ type Model struct {
 	cancel   context.CancelFunc
 
 	details   map[string]github.Detail // last known details by PR ID; kept across refreshes
-	fetched   map[string]fetchState    // per PR ID, for the current search only
+	fetched   map[string]fetchState    // per PR ID; a reload forgets all but the requests in flight
 	fetching  int                      // details requests in flight
-	detailCtx context.Context          //nolint:containedctx // ends with the search, like cancel
 	detailErr error                    // last failure loading details; the rows stay usable
 
-	refreshEvery    time.Duration // base poll interval for pending PRs; 0 turns polling off
-	refreshInterval time.Duration // current interval, backed off while polls find nothing new
-	refreshArmed    bool          // a poll tick is scheduled
+	refreshEvery time.Duration   // base poll interval for waiting PRs; 0 turns polling off
+	polls        map[string]poll // per PR ID, the listed PRs waiting on something
+	pollArmed    bool            // a look for due polls is scheduled
 
 	cancelMore context.CancelFunc // stops the further page being fetched, if any
 
@@ -189,7 +181,7 @@ func New(client *github.Client, query string) Model {
 		cache:       map[string]github.Page{},
 		details:     map[string]github.Detail{},
 		fetched:     map[string]fetchState{},
-		detailCtx:   context.Background(),
+		polls:       map[string]poll{},
 		loading:     true,
 		markdown:    newMarkdownCache(),
 		spinner:     spin,

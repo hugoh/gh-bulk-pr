@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/cli/go-gh/v2/pkg/api"
 	"github.com/stretchr/testify/assert"
@@ -53,101 +54,6 @@ const (
 	testNodeID = "PR_1"
 )
 
-func TestClientActions(t *testing.T) {
-	t.Parallel()
-
-	tests := map[string]struct {
-		call           func(context.Context, *Client) error
-		wantMethod     string
-		wantPath       string
-		wantBodySubstr string
-	}{
-		"add label": {
-			call: func(ctx context.Context, c *Client) error {
-				return c.AddLabel(ctx, PR{Repo: testRepo, Number: 7}, "bug")
-			},
-			wantMethod:     http.MethodPost,
-			wantPath:       "/repos/hugoh/gh-bulk-pr/issues/7/labels",
-			wantBodySubstr: `"bug"`,
-		},
-		"close pr": {
-			call:           func(ctx context.Context, c *Client) error { return c.ClosePR(ctx, PR{Repo: testRepo, Number: 7}) },
-			wantMethod:     http.MethodPatch,
-			wantPath:       "/repos/hugoh/gh-bulk-pr/pulls/7",
-			wantBodySubstr: `"closed"`,
-		},
-		"merge pr": {
-			call:           func(ctx context.Context, c *Client) error { return c.MergePR(ctx, PR{Repo: testRepo, Number: 7}) },
-			wantMethod:     http.MethodPut,
-			wantPath:       "/repos/hugoh/gh-bulk-pr/pulls/7/merge",
-			wantBodySubstr: `"squash"`,
-		},
-		"update branch": {
-			call: func(ctx context.Context, c *Client) error {
-				return c.UpdateBranch(ctx, PR{Repo: testRepo, Number: 7})
-			},
-			wantMethod:     http.MethodPut,
-			wantPath:       "/repos/hugoh/gh-bulk-pr/pulls/7/update-branch",
-			wantBodySubstr: `{}`,
-		},
-	}
-
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			var gotMethod, gotPath string
-
-			var gotBody bytes.Buffer
-
-			rest := newTestRESTClient(t, func(r *http.Request) (*http.Response, error) {
-				gotMethod = r.Method
-				gotPath = r.URL.Path
-
-				if r.Body != nil {
-					_, _ = io.Copy(&gotBody, r.Body)
-				}
-
-				return jsonResponse("{}"), nil
-			})
-
-			client := &Client{rest: rest}
-			require.NoError(t, tt.call(context.Background(), client))
-
-			assert.Equal(t, tt.wantMethod, gotMethod)
-			assert.Equal(t, tt.wantPath, gotPath)
-			assert.Contains(t, gotBody.String(), tt.wantBodySubstr)
-		})
-	}
-}
-
-func TestClientActions_TransportError(t *testing.T) {
-	t.Parallel()
-
-	rest := newTestRESTClient(t, func(*http.Request) (*http.Response, error) {
-		return nil, errors.New("boom")
-	})
-
-	client := &Client{rest: rest}
-
-	tests := map[string]func() error{
-		"add label": func() error { return client.AddLabel(context.Background(), PR{Repo: testRepo, Number: 1}, "bug") },
-		"close pr":  func() error { return client.ClosePR(context.Background(), PR{Repo: testRepo, Number: 1}) },
-		"merge pr":  func() error { return client.MergePR(context.Background(), PR{Repo: testRepo, Number: 1}) },
-		"update branch": func() error {
-			return client.UpdateBranch(context.Background(), PR{Repo: testRepo, Number: 1})
-		},
-	}
-
-	for name, call := range tests {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			require.Error(t, call())
-		})
-	}
-}
-
 const searchResponseJSON = `{
   "data": {
     "search": {
@@ -160,7 +66,10 @@ const searchResponseJSON = `{
           "title": "Fix bug",
           "autoMergeRequest": {"enabledAt": "2026-09-20T00:00:00Z"},
           "url": "https://github.com/hugoh/r/pull/1",
-          "repository": {"nameWithOwner": "hugoh/r"},
+          "repository": {
+            "nameWithOwner": "hugoh/r",
+            "squashMergeAllowed": false, "mergeCommitAllowed": false, "rebaseMergeAllowed": true
+          },
           "author": {"login": "hugoh"}
         }
       ]
@@ -202,6 +111,7 @@ func TestSearchPage(t *testing.T) {
 	assert.Equal(t, "hugoh", pr.Author)
 	assert.Equal(t, "PR_node1", pr.ID)
 	assert.True(t, pr.AutoMerge, "auto-merge is cheap, so the search carries it")
+	assert.Equal(t, MergeRebase, pr.MergeMethod, "the only method the repo allows")
 	assert.False(t, pr.Detailed)
 }
 
@@ -250,6 +160,8 @@ const detailsResponseJSON = `{
     "nodes": [
       {
         "id": "PR_node1",
+        "state": "OPEN",
+        "autoMergeRequest": {"enabledAt": "2026-10-11T15:00:00Z"},
         "body": "body",
         "mergeStateStatus": "BEHIND",
         "labels": {"nodes": [{"name": "bug"}]},
@@ -262,11 +174,18 @@ const detailsResponseJSON = `{
       null,
       {
         "id": "PR_node3",
+        "state": "MERGED",
+        "closedAt": "2026-10-11T15:55:34Z",
         "mergeStateStatus": "DIRTY",
         "commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": "ERROR"}}}]}
       }
     ]
-  }
+  },
+  "errors": [{
+    "type": "NOT_FOUND",
+    "path": ["nodes", 1],
+    "message": "Could not resolve to a node with the global id of 'PR_gone'"
+  }]
 }`
 
 func TestDetails(t *testing.T) {
@@ -288,6 +207,7 @@ func TestDetails(t *testing.T) {
 	assert.Equal(t, Detail{
 		ID:         "PR_node1",
 		Body:       "body",
+		AutoMerge:  true,
 		MergeState: "BEHIND",
 		Checks:     ChecksPass,
 		Labels:     []string{"bug"},
@@ -295,6 +215,22 @@ func TestDetails(t *testing.T) {
 	}, details[0])
 	assert.Equal(t, ChecksFail, details[1].Checks)
 	assert.Equal(t, "DIRTY", details[1].MergeState)
+	assert.True(t, details[1].Closed, "a merged PR is closed")
+	assert.Equal(t, time.Date(2026, 10, 11, 15, 55, 34, 0, time.UTC), details[1].ClosedAt)
+}
+
+func TestDetails_OtherGraphQLErrorFails(t *testing.T) {
+	t.Parallel()
+
+	var sent string
+
+	gql := graphQLCapturing(t, &sent, `{
+  "data": {"nodes": [null]},
+  "errors": [{"type": "FORBIDDEN", "message": "Resource protected by organization SAML enforcement"}]
+}`)
+
+	_, err := (&Client{gql: gql}).Details(context.Background(), []string{testNodeID})
+	require.ErrorContains(t, err, "SAML")
 }
 
 func TestDetails_NoIDsSendsNothing(t *testing.T) {
@@ -320,122 +256,6 @@ func TestDetails_TransportError(t *testing.T) {
 
 	_, err := (&Client{gql: gql}).Details(context.Background(), []string{testNodeID})
 	require.ErrorContains(t, err, "boom")
-}
-
-func TestPR_WithDetail(t *testing.T) {
-	t.Parallel()
-
-	light := PR{ID: "PR_1", Number: 3, Title: "Fix", AutoMerge: true}
-	full := light.WithDetail(Detail{
-		ID: "PR_1", Body: "b", MergeState: MergeClean, Checks: ChecksPass,
-		Labels: []string{"x"}, Reviewers: []string{"y"},
-	})
-
-	assert.True(t, full.Detailed)
-	assert.Equal(t, "Fix", full.Title, "the search's fields are kept")
-	assert.True(t, full.AutoMerge)
-	assert.Equal(t, "b", full.Body)
-	assert.Equal(t, MergeClean, full.MergeState)
-	assert.Equal(t, ChecksPass, full.Checks)
-	assert.Equal(t, []string{"x"}, full.Labels)
-	assert.Equal(t, []string{"y"}, full.Reviewers)
-	assert.False(t, light.Detailed, "the original is untouched")
-}
-
-func TestToggleAutoMerge(t *testing.T) {
-	t.Parallel()
-
-	tests := map[string]struct {
-		pr        PR
-		wantQuery string
-		wantVars  string
-	}{
-		"enables when off": {
-			pr:        PR{ID: testNodeID},
-			wantQuery: "enablePullRequestAutoMerge",
-			wantVars:  "mergeMethod: SQUASH",
-		},
-		"disables when on": {
-			pr:        PR{ID: testNodeID, AutoMerge: true},
-			wantQuery: "disablePullRequestAutoMerge",
-			wantVars:  "disablePullRequestAutoMerge(input: {pullRequestId: $id})",
-		},
-	}
-
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			var sent string
-
-			gql := newTestGraphQLClient(t, func(r *http.Request) (*http.Response, error) {
-				body, _ := io.ReadAll(r.Body)
-				sent = string(body)
-
-				return jsonResponse(`{"data": {}}`), nil
-			})
-
-			require.NoError(t, (&Client{gql: gql}).ToggleAutoMerge(context.Background(), tt.pr))
-			assert.Contains(t, sent, tt.wantQuery)
-			assert.Contains(t, sent, tt.wantVars)
-			assert.Contains(t, sent, `"id":"`+testNodeID+`"`)
-		})
-	}
-}
-
-func TestToggleAutoMerge_MergesACleanPRNow(t *testing.T) {
-	t.Parallel()
-
-	var gotMethod, gotPath string
-
-	rest := newTestRESTClient(t, func(r *http.Request) (*http.Response, error) {
-		gotMethod, gotPath = r.Method, r.URL.Path
-
-		return jsonResponse("{}"), nil
-	})
-	gql := newTestGraphQLClient(t, func(*http.Request) (*http.Response, error) {
-		t.Error("GitHub refuses auto-merge on a clean PR, so it must not be asked to")
-
-		return jsonResponse(`{"data": {}}`), nil
-	})
-
-	pull := PR{ID: testNodeID, Repo: testRepo, Number: 7, MergeState: MergeClean}
-	require.NoError(t, (&Client{gql: gql, rest: rest}).ToggleAutoMerge(context.Background(), pull))
-	assert.Equal(t, http.MethodPut, gotMethod)
-	assert.Equal(t, "/repos/hugoh/gh-bulk-pr/pulls/7/merge", gotPath)
-}
-
-func TestMergesNow(t *testing.T) {
-	t.Parallel()
-
-	tests := map[string]struct {
-		pr   PR
-		want bool
-	}{
-		"clean":                 {PR{MergeState: "CLEAN"}, true},
-		"clean with auto-merge": {PR{MergeState: "CLEAN", AutoMerge: true}, false},
-		"behind":                {PR{MergeState: "BEHIND"}, false},
-		"details not loaded":    {PR{}, false},
-	}
-
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			require.Equal(t, tt.want, tt.pr.MergesNow())
-		})
-	}
-}
-
-func TestToggleAutoMerge_Error(t *testing.T) {
-	t.Parallel()
-
-	gql := newTestGraphQLClient(t, func(*http.Request) (*http.Response, error) {
-		return jsonResponse(`{"errors": [{"message": "Pull request is in clean status"}]}`), nil
-	})
-
-	err := (&Client{gql: gql}).ToggleAutoMerge(context.Background(), PR{ID: testNodeID})
-	require.ErrorContains(t, err, "clean status")
 }
 
 const stabilityDays = "renovate/stability-days"
@@ -474,40 +294,4 @@ func TestDetails_PendingChecks(t *testing.T) {
 	assert.Contains(t, sent, "contexts")
 	assert.Equal(t, ChecksPending, details[0].Checks)
 	assert.Equal(t, []string{stabilityDays, "build"}, details[0].Pending)
-}
-
-func TestPR_WithDetail_CopiesPending(t *testing.T) {
-	t.Parallel()
-
-	full := PR{}.WithDetail(Detail{Checks: ChecksPending, Pending: []string{stabilityDays}})
-
-	assert.Equal(t, []string{stabilityDays}, full.Pending)
-}
-
-func TestPR_Waiting(t *testing.T) {
-	t.Parallel()
-
-	tests := map[string]struct {
-		pr   PR
-		want bool
-	}{
-		"pending checks": {PR{Detailed: true, Checks: ChecksPending}, true},
-		"merge state unknown": {
-			PR{Detailed: true, Checks: ChecksPass, MergeState: "UNKNOWN"},
-			true,
-		},
-		"passing": {
-			PR{Detailed: true, Checks: ChecksPass, MergeState: MergeClean},
-			false,
-		},
-		"failing":            {PR{Detailed: true, Checks: ChecksFail}, false},
-		"details not loaded": {PR{Checks: ChecksPending}, false},
-	}
-
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-			assert.Equal(t, tt.want, tt.pr.Waiting())
-		})
-	}
 }

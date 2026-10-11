@@ -133,14 +133,45 @@ func mergeStyle(label string) lipgloss.Style {
 	}
 }
 
-// colorMerge colors the Merge column of the rendered table. It works by
-// visible offset rather than by text so PR titles that happen to contain
-// "behind" or "clean" are never touched.
+// colorMerge colors the Merge column of the rendered table.
 func colorMerge(rendered string, cols []table.Column) string {
+	return colorColumn(rendered, cols, "Merge", mergeStyle)
+}
+
+// colorChecks colors the check glyph in the CI column of the rendered table.
+func colorChecks(rendered string, cols []table.Column) string {
+	return colorColumn(rendered, cols, "CI", checkStyle)
+}
+
+func checkStyle(glyph string) lipgloss.Style {
+	switch glyph {
+	case "✓":
+		return okStyle()
+	case "✗":
+		return errStyle()
+	case "●":
+		return previewLabelStyle()
+	default:
+		return lipgloss.NewStyle()
+	}
+}
+
+// colorColumn colors each cell of the column titled title after the table
+// renders: the table truncates cells by width counting ANSI escapes, so cells
+// can't carry color. It works by visible offset rather than by text so PR
+// titles that happen to contain "behind" or "✓" are never touched. On the
+// cursor row the cell's reset would end the selection highlight, so the
+// highlight is re-opened after it.
+func colorColumn(
+	rendered string,
+	cols []table.Column,
+	title string,
+	styleFor func(cell string) lipgloss.Style,
+) string {
 	start, width, found := 1, 0, false // 1: the cell's left padding
 
 	for _, col := range cols {
-		if col.Title == "Merge" {
+		if col.Title == title {
 			width, found = col.Width, true
 
 			break
@@ -164,7 +195,7 @@ func colorMerge(rendered string, cols []table.Column) string {
 			continue
 		}
 
-		restore, style := "", mergeStyle(cell)
+		restore, style := "", styleFor(cell)
 		if sel != "" && strings.HasPrefix(line, sel) {
 			restore, style = sel, onCursor(style)
 		}
@@ -173,30 +204,6 @@ func colorMerge(rendered string, cols []table.Column) string {
 		lines[idx] = ansi.Truncate(line, start, "") +
 			style.Render(cell) + restore + pad +
 			ansi.TruncateLeft(line, start+width, "")
-	}
-
-	return strings.Join(lines, "\n")
-}
-
-// colorChecks colors the check glyphs after the table renders: the table
-// truncates cells by width counting ANSI escapes, so cells can't carry color.
-// On the cursor row the glyph's reset would end the selection highlight, so
-// the highlight is re-opened after each glyph.
-func colorChecks(rendered string) string {
-	sel := selectedRowPrefix()
-
-	lines := strings.Split(rendered, "\n")
-	for idx, line := range lines {
-		pass, fail, wait, restore := okStyle(), errStyle(), previewLabelStyle(), ""
-		if sel != "" && strings.HasPrefix(line, sel) {
-			pass, fail, wait, restore = onCursor(pass), onCursor(fail), onCursor(wait), sel
-		}
-
-		lines[idx] = strings.NewReplacer(
-			"✓", pass.Render("✓")+restore,
-			"✗", fail.Render("✗")+restore,
-			"●", wait.Render("●")+restore,
-		).Replace(line)
 	}
 
 	return strings.Join(lines, "\n")
@@ -308,7 +315,10 @@ func (m Model) loadMoreLine() string {
 }
 
 func (m Model) listWithPreview() string {
-	list := colorMerge(colorChecks(m.table.View()), m.table.Columns()) + "\n" + m.loadMoreLine()
+	list := colorMerge(
+		colorChecks(m.table.View(), m.table.Columns()),
+		m.table.Columns(),
+	) + "\n" + m.loadMoreLine()
 
 	if pr, ok := m.focusedPR(); ok && m.previewOpen {
 		sep := separatorStyle().Render(strings.Repeat("─", max(lipgloss.Width(list), 1)))
@@ -322,7 +332,7 @@ func (m Model) listWithPreview() string {
 // filter and label screens.
 func (m Model) promptLabel() string {
 	if m.screen == screenActionInput {
-		return fmt.Sprintf("Label for %d PR(s): ", len(m.selectedPRs()))
+		return fmt.Sprintf("Label for %d PR(s): ", len(m.targetPRs()))
 	}
 
 	return "Search: "
@@ -560,6 +570,15 @@ func previewHead(item github.PR) string {
 		)
 	}
 
+	if item.RebaseRequested() {
+		fmt.Fprintf(
+			&buf,
+			"%s %s\n",
+			helpStyle().Render("renovate:"),
+			previewLabelStyle().Render("rebase requested"),
+		)
+	}
+
 	if len(item.Reviewers) > 0 {
 		fmt.Fprintf(
 			&buf,
@@ -671,6 +690,8 @@ func (m Model) resultsBody() string {
 		status := okStyle().Render("✓")
 		if res.Err != nil {
 			status = errStyle().Render("✗ " + res.Err.Error())
+		} else if m.action != nil && m.action.note != nil && m.action.note(res.PR) != "" {
+			status += "  → " + m.action.note(res.PR)
 		}
 
 		lines[idx] = fmt.Sprintf(
