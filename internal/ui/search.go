@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"slices"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -53,13 +54,26 @@ func (m Model) handleSearchDone(msg searchDoneMsg) Model {
 	m.err = msg.err
 
 	if msg.err == nil {
+		focused, hadFocus := m.focusedPR()
 		m.prs, m.hidden = msg.PRs, 0
 		m = m.withStoredDetails()
 		m.selected = survivingSelection(m.selected, m.prs)
 		m = m.storePaging(msg)
+
 		m = m.refreshRows()
+		if hadFocus {
+			m = m.refocus(keyOf(focused))
+		}
+
 		m.lastUpdated = time.Now()
 	}
+
+	return m
+}
+
+// refocus moves the cursor to the PR with key, or to the top if it is gone.
+func (m Model) refocus(key prKey) Model {
+	m.table.SetCursor(slices.IndexFunc(m.prs, func(pr github.PR) bool { return keyOf(pr) == key }))
 
 	return m
 }

@@ -319,3 +319,35 @@ func TestSearchDone_ShowsRowsWithPlaceholdersUntilDetailsLand(t *testing.T) {
 	assert.Equal(t, "…", m.table.Rows()[0][4])
 	assert.Equal(t, "…", m.table.Rows()[0][5])
 }
+
+func TestHandleSearchDone_CursorFollowsFocusedPR(t *testing.T) {
+	t.Parallel()
+
+	first := github.PR{Number: 1, Repo: testRepoA, Title: "one"}
+	second := github.PR{Number: 2, Repo: testRepoB, Title: "two"}
+	third := github.PR{Number: 3, Repo: testRepoB, Title: "three"}
+
+	tests := []struct {
+		name   string
+		result []github.PR
+		want   int
+	}{
+		{"row moved down", []github.PR{first, third, second}, 2},
+		{"row moved up", []github.PR{second, first, third}, 0},
+		{"row gone", []github.PR{first, third}, 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			m := New(nil, "q").handleResize(tea.WindowSizeMsg{Width: 110, Height: 30})
+			m = m.handleSearchDone(searchDoneMsg{PRs: []github.PR{first, second, third}})
+			m.table.SetCursor(1)
+
+			m = m.handleSearchDone(searchDoneMsg{PRs: tt.result})
+
+			require.Equal(t, tt.want, m.table.Cursor())
+		})
+	}
+}
