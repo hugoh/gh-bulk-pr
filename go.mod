@@ -5,10 +5,10 @@ go 1.27.1
 require (
 	charm.land/bubbles/v2 v2.2.1
 	charm.land/bubbletea/v2 v2.1.0
-	charm.land/glamour/v2 v2.0.1
+	charm.land/glamour/v2 v2.0.2-0.20261015065741-010543cac1a0
 	charm.land/lipgloss/v2 v2.0.6
 	github.com/charmbracelet/x/ansi v0.11.9
-	github.com/cli/go-gh/v2 v2.16.2
+	github.com/cli/go-gh/v2 v2.17.0
 	github.com/stretchr/testify v1.12.1
 )
 
