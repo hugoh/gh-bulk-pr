@@ -124,3 +124,21 @@ func TestPR_Bot(t *testing.T) {
 		})
 	}
 }
+
+func TestPR_RenovateAutomerge(t *testing.T) {
+	t.Parallel()
+
+	const enabled = "\U0001F6A6 **Automerge**: Enabled.\n"
+
+	disabled := "\U0001F6A6 **Automerge**: Disabled by config. Please merge this manually once you are satisfied.\n"
+
+	assert.True(t, PR{Body: renovateBody + enabled}.RenovateAutomerge())
+	assert.False(t, PR{Body: renovateBody + disabled}.RenovateAutomerge())
+	assert.False(t, PR{Body: renovateBody}.RenovateAutomerge())
+	assert.False(t, PR{Body: plainBody + enabled}.RenovateAutomerge(), "only Renovate's own PRs")
+	assert.True(
+		t,
+		PR{Detailed: true, Checks: ChecksPass, Body: renovateBody + enabled}.Waiting(),
+		"Renovate merges it without anyone acting",
+	)
+}

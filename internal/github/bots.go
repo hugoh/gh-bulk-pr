@@ -17,6 +17,8 @@ const (
 	rebaseLabel = "rebase"
 )
 
+const renovateAutomergeOn = "**Automerge**: Enabled"
+
 const (
 	renovateLogin   = "renovate"
 	dependabotLogin = "dependabot"
@@ -43,6 +45,13 @@ func (p PR) Bot() string {
 	}
 
 	return ""
+}
+
+// RenovateAutomerge reports whether Renovate says in its PR body that it will
+// merge the PR itself once its checks pass. That is Renovate's intent: it still
+// waits on required checks and its stability days.
+func (p PR) RenovateAutomerge() bool {
+	return p.Renovate() && strings.Contains(p.Body, renovateAutomergeOn)
 }
 
 // RebaseRequested reports whether Renovate has been asked to rebase the PR

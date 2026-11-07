@@ -547,11 +547,6 @@ func rowsFor(prs []github.PR, selected map[prKey]bool, fetched map[string]fetchS
 			merge = mergeLabel(entry.MergeState)
 		}
 
-		auto := ""
-		if entry.AutoMerge {
-			auto = "on"
-		}
-
 		rows[idx] = table.Row{
 			mark,
 			entry.Repo,
@@ -559,11 +554,23 @@ func rowsFor(prs []github.PR, selected map[prKey]bool, fetched map[string]fetchS
 			entry.Title,
 			checks,
 			merge,
-			auto,
+			autoCell(entry),
 			entry.Author,
 			age(entry.UpdatedAt),
 		}
 	}
 
 	return rows
+}
+
+// autoCell says who merges the PR on its own: GitHub ("on") or Renovate ("bot").
+func autoCell(entry github.PR) string {
+	switch {
+	case entry.AutoMerge:
+		return "on"
+	case entry.RenovateAutomerge():
+		return "bot"
+	}
+
+	return ""
 }

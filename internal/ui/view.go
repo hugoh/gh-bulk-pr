@@ -534,6 +534,8 @@ func previewMerge(item github.PR) string {
 
 	if item.AutoMerge {
 		text += " · auto-merge"
+	} else if item.RenovateAutomerge() {
+		text += " · renovate auto-merge"
 	}
 
 	return mergeStyle(label).Render(text)
