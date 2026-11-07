@@ -42,7 +42,8 @@ func (p PR) MergesNow() bool {
 // closed PR waits on nothing.
 func (p PR) Waiting() bool {
 	return p.Detailed && !p.Closed &&
-		(p.Checks == ChecksPending || p.MergeState == MergeUnknown || p.AutoMerge || p.RebaseRequested())
+		(p.Checks == ChecksPending || p.MergeState == MergeUnknown ||
+			p.AutoMerge || p.RenovateAutomerge() || p.RebaseRequested())
 }
 
 // Detail is what SearchPage leaves out because GitHub computes it per PR and
