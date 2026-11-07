@@ -2,7 +2,7 @@ package github
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"net/http"
 	"strings"
@@ -33,7 +33,7 @@ func TestRequestRebase_AddsRenovatesRebaseLabel(t *testing.T) {
 
 	rest := newTestRESTClient(t, func(r *http.Request) (*http.Response, error) {
 		gotMethod, gotPath = r.Method, r.URL.Path
-		if err := json.NewDecoder(r.Body).Decode(&labels); err != nil {
+		if err := json.UnmarshalRead(r.Body, &labels); err != nil {
 			return nil, fmt.Errorf("decode labels: %w", err)
 		}
 
@@ -78,7 +78,7 @@ func TestRequestRebase_AsksDependabotInAComment(t *testing.T) {
 
 	rest := newTestRESTClient(t, func(r *http.Request) (*http.Response, error) {
 		gotMethod, gotPath = r.Method, r.URL.Path
-		if err := json.NewDecoder(r.Body).Decode(&written); err != nil {
+		if err := json.UnmarshalRead(r.Body, &written); err != nil {
 			return nil, fmt.Errorf("decode comment: %w", err)
 		}
 
