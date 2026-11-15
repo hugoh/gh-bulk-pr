@@ -32,6 +32,9 @@ builds:
 archives:
   - formats: [binary]
     name_template: "gh-bulk-pr-{{ .Os }}-{{ .Arch }}"
+release:
+  prerelease: auto
+
 changelog:
   use: git
   sort: asc
